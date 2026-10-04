@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env.local
+.firebase/
+*-debug.log
+playwright-report/
+test-results/
+tests/*.png
+*.tsbuildinfo
