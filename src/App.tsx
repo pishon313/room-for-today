@@ -35,7 +35,7 @@ import { effectiveRoutineDays, routineWeekProgress } from "./routineSchedule";
 
 type Theme = "light" | "dark";
 type ThemeChoice = Theme | "system" | "sierra-blue" | "deep-black" | "gray";
-type View = "dashboard" | "routine" | "settings";
+type View = "dashboard" | "routine" | "memo" | "settings";
 
 const themeOptions: { id: ThemeChoice; label: string; description: string }[] =
   [
@@ -85,7 +85,9 @@ function readThemeChoice(): ThemeChoice {
 
 function viewFromHash(): View {
   const hash = window.location.hash.slice(1);
-  return hash === "routine" || hash === "settings" ? hash : "dashboard";
+  return hash === "routine" || hash === "memo" || hash === "settings"
+    ? hash
+    : "dashboard";
 }
 
 function Text({
@@ -352,6 +354,12 @@ export default function App() {
             Routine
           </button>
           <button
+            aria-current={view === "memo" ? "page" : undefined}
+            onClick={() => showView("memo")}
+          >
+            Memo
+          </button>
+          <button
             aria-current={view === "settings" ? "page" : undefined}
             onClick={() => showView("settings")}
           >
@@ -401,6 +409,8 @@ export default function App() {
             <h1>
               {view === "routine"
                 ? "Find your rhythm."
+                : view === "memo"
+                  ? "Make room for your thoughts."
                 : view === "settings"
                   ? "Make this space yours."
                   : "Make room for what matters."}
@@ -408,6 +418,8 @@ export default function App() {
             <p>
               {view === "settings" ? (
                 "Choose the colors that feel right for you."
+              ) : view === "memo" ? (
+                "Ideas, reminders, and thoughts in one quiet place."
               ) : (
                 <>
                   {label(current, {
@@ -421,7 +433,7 @@ export default function App() {
               )}
             </p>
           </div>
-          {view !== "settings" && (
+          {(view === "dashboard" || view === "routine") && (
             <button
               className="primary"
               disabled={!enabled}

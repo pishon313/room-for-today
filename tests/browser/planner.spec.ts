@@ -32,6 +32,30 @@ async function login(page: Page, uid: string) {
   }, uid);
   await expect(page.locator("header [role=status]")).toHaveText("Saved");
 }
+test("Memo has its own responsive view and dashboard stays schedule-focused", async ({
+  page,
+}) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".monthly")).toBeVisible();
+  await expect(page.locator(".weekly")).toBeVisible();
+  await expect(page.locator(".daily")).toBeVisible();
+  await expect(page.locator(".memos")).toBeHidden();
+
+  await page.getByRole("button", { name: "Memo", exact: true }).click();
+  await expect(page).toHaveURL(/#memo$/);
+  await expect(page.locator(".memos")).toBeVisible();
+  await expect(page.locator(".monthly")).toBeHidden();
+  await expect(page.locator(".weekly")).toBeHidden();
+  await expect(page.locator(".daily")).toBeHidden();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.locator(".memos")).toBeVisible();
+  await page.screenshot({ path: "tests/memo-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+  await page.screenshot({ path: "tests/memo-iphone.png", fullPage: true });
+  await page.setViewportSize({ width: 320, height: 700 });
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 320);
+});
 test("theme follows the system, toggles without changing layout, and remembers the choice", async ({
   browser,
 }) => {
@@ -283,6 +307,12 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await p.getByRole("button", { name: "Dashboard", exact: true }).click();
   await expect(p.locator(".routine-today-summary")).toContainText("0 left");
   await expect(q.locator(".routine-today-summary")).toContainText("0 left");
+  await expect(p.locator(".memos")).not.toBeVisible();
+  await p.getByRole("button", { name: "Memo", exact: true }).click();
+  await expect(p).toHaveURL(/#memo$/);
+  await expect(p.locator(".memos")).toBeVisible();
+  await expect(p.locator(".monthly")).not.toBeVisible();
+  await q.getByRole("button", { name: "Memo", exact: true }).click();
   await p.getByRole("button", { name: "New note", exact: true }).click();
   const noteRecord = await p.evaluate(
     () =>
@@ -296,6 +326,12 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
     .getByPlaceholder("Let your thoughts land here…")
     .fill("Leave space between plans.");
   await expect(p.locator("header [role=status]")).toHaveText("Saved");
+  await expect(q.getByPlaceholder("Note title")).toHaveValue(
+    "A small reminder",
+  );
+  await expect(q.getByPlaceholder("Let your thoughts land here…")).toHaveValue(
+    "Leave space between plans.",
+  );
   const desktopPlannerTop = await p
     .locator(".planner")
     .evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
@@ -346,6 +382,8 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
     "Rejected edit is preserved",
   );
   await p.reload();
+  await expect(p).toHaveURL(/#memo$/);
+  await expect(p.locator(".memos")).toBeVisible();
   await expect(p.getByPlaceholder("Let your thoughts land here…")).toHaveValue(
     "Rejected edit is preserved",
   );
@@ -376,11 +414,14 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
     await p.getByRole("button", { name, exact: true }).click();
     await expect(p.locator("html")).toHaveAttribute("data-theme", value);
     await p.getByRole("button", { name: "Dashboard", exact: true }).click();
+    await expect(p.locator(".memos")).not.toBeVisible();
+    await p.screenshot({ path: file, fullPage: true });
+    await p.getByRole("button", { name: "Memo", exact: true }).click();
     await expect(p.getByPlaceholder("Note title")).toHaveValue(
       "A small reminder",
     );
-    await p.screenshot({ path: file, fullPage: true });
   }
+  await p.getByRole("button", { name: "Dashboard", exact: true }).click();
   await p.getByRole("button", { name: "Switch to dark mode" }).click();
   await p.screenshot({ path: "tests/dark-desktop.png", fullPage: true });
   await p.setViewportSize({ width: 390, height: 844 });
@@ -397,6 +438,8 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await expect(p.getByPlaceholder("Name your habit")).toHaveValue("Stretch");
   await p.screenshot({ path: "tests/routine-iphone.png", fullPage: true });
   await p.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await p.getByRole("button", { name: "Memo", exact: true }).click();
+  await expect(p.locator("body")).toHaveJSProperty("scrollWidth", 390);
   const mobilePlannerTop = await p
     .locator(".planner")
     .evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
@@ -411,6 +454,8 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   ).toBe(mobilePlannerTop);
   await a.setOffline(false);
   await expect(p.locator("header [role=status]")).toHaveText("Saved");
+  await p.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await q.getByRole("button", { name: "Dashboard", exact: true }).click();
   await p
     .getByRole("button", {
       name: "Complete Title from first device",
@@ -445,12 +490,16 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
     p.locator(".weekly").getByPlaceholder("Name your goal"),
   ).toHaveValue("Weekly focus");
   p.on("dialog", (d) => d.accept());
+  await p.getByRole("button", { name: "Memo", exact: true }).click();
+  await q.getByRole("button", { name: "Memo", exact: true }).click();
   await p
     .getByRole("button", { name: "Delete A reminder on iPhone", exact: true })
     .click();
   await expect(q.getByPlaceholder("Let your thoughts land here…")).toHaveCount(
     0,
   );
+  await p.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await q.getByRole("button", { name: "Dashboard", exact: true }).click();
   await p
     .getByRole("button", {
       name: "Delete Title from first device",
@@ -461,6 +510,7 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   const c = await browser.newContext();
   const other = await c.newPage();
   await login(other, "other-" + Date.now());
+  await other.getByRole("button", { name: "Memo", exact: true }).click();
   await expect(
     other.getByPlaceholder("Let your thoughts land here…"),
   ).toHaveCount(0);
