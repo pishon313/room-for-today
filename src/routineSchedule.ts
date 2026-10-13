@@ -5,6 +5,7 @@ export function effectiveRoutineDays(
   date: string,
   items: Item[],
 ): number[] {
+  if (routine.startDate && date < routine.startDate) return [];
   let latest: Item | undefined;
   for (const item of items) {
     if (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   collection,
   doc,
@@ -7,6 +7,8 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { today } from "./dates";
+import { Outbox, type Op } from "./outbox";
 export type Kind =
   | "monthly"
   | "weekly"
@@ -25,14 +27,8 @@ export type Item = {
   done: boolean;
   days: number[];
   deleted: boolean;
+  startDate?: string;
 };
-type Op = { id: string; record: string; patch: Partial<Item>; at: number };
-const prefix = (uid: string) => "planner-pending:" + uid + ":";
-export const pending = (uid: string): Op[] =>
-  Object.keys(localStorage)
-    .filter((k) => k.startsWith(prefix(uid)))
-    .map((k) => JSON.parse(localStorage.getItem(k)!))
-    .sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
 export function batches(ops: Op[]) {
   const groups = new Map<
     string,
@@ -61,6 +57,15 @@ export function project(cloud: Item[], ops: Op[]) {
   return [...map.values()].filter((x) => !x.deleted);
 }
 export function usePlanner(uid: string | undefined) {
+  const outboxes = useRef(new Map<string, Outbox>());
+  const getOutbox = (account: string) => {
+    let outbox = outboxes.current.get(account);
+    if (!outbox) {
+      outbox = new Outbox(account);
+      outboxes.current.set(account, outbox);
+    }
+    return outbox;
+  };
   const [restart, setRestart] = useState(0);
   const [cloud, setCloud] = useState<Item[]>([]),
     [ops, setOps] = useState<Op[]>([]),
@@ -75,17 +80,18 @@ export function usePlanner(uid: string | undefined) {
     setConfirmed(false);
     setError("");
     if (!uid || !db) return;
+    const outbox = getOutbox(uid);
     let alive = true;
     let running = false;
     const refresh = () => {
-      if (alive) setOps(pending(uid));
+      if (alive) setOps(outbox.snapshot());
     };
     const flush = async () => {
       if (running || !navigator.onLine) return;
       running = true;
       try {
         await navigator.locks.request("planner-sync:" + uid, async () => {
-          for (const op of batches(pending(uid))) {
+          for (const op of batches(outbox.snapshot())) {
             if (!alive) break;
             const slow = setTimeout(() => {
               if (alive)
@@ -102,7 +108,7 @@ export function usePlanner(uid: string | undefined) {
             } finally {
               clearTimeout(slow);
             }
-            for (const id of op.ids) localStorage.removeItem(prefix(uid) + id);
+            outbox.acknowledge(op.ids);
             if (alive) {
               setError("");
               refresh();
@@ -166,22 +172,15 @@ export function usePlanner(uid: string | undefined) {
   }, [uid, restart]);
   const patch = (record: string, data: Partial<Item>) => {
     if (!uid) return;
-    const op: Op = {
-      id: crypto.randomUUID(),
-      record,
-      patch: data,
-      at: Date.now(),
-    };
-    try {
-      localStorage.setItem(prefix(uid) + op.id, JSON.stringify(op));
-      setOps(pending(uid));
-      window.dispatchEvent(new Event("planner-queue"));
-    } catch {
-      setOps((prev) => [...prev, op]);
+    const outbox = getOutbox(uid);
+    const durable = outbox.enqueue(record, data);
+    setOps(outbox.snapshot());
+    if (!durable) {
       setError(
-        "Couldn’t save: device storage is full. Keep this page open and copy your text before closing.",
+        "Couldn’t save to device storage. Keep this page open and copy your text before closing; cloud saving will retry.",
       );
     }
+    window.dispatchEvent(new Event("planner-queue"));
   };
   const add = (kind: Kind, period: string, extra: Partial<Item> = {}) => {
     const id = crypto.randomUUID();
@@ -194,6 +193,7 @@ export function usePlanner(uid: string | undefined) {
       done: false,
       days: [0, 1, 2, 3, 4],
       deleted: false,
+      ...(kind === "routine" ? { startDate: today() } : {}),
       ...extra,
     });
     return id;

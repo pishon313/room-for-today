@@ -96,3 +96,13 @@ describe("routine schedule history", () => {
     ).toEqual({ done: 0, total: 3 });
   });
 });
+
+it("excludes dates before a new routine starts, including with schedule history", () => {
+  const newlyCreated = { ...routine, startDate: "2026-10-01" };
+  expect(effectiveRoutineDays(newlyCreated, "2026-09-30", history)).toEqual([]);
+  expect(effectiveRoutineDays(newlyCreated, "2026-10-01", history)).toEqual([1, 3, 5]);
+  expect(routineWeekProgress([newlyCreated], weekDays("2026-09-21"), history))
+    .toEqual({ done: 0, total: 0 });
+  expect(routineWeekProgress([newlyCreated], weekDays("2026-10-01"), history))
+    .toEqual({ done: 0, total: 2 });
+});

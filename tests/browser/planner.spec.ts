@@ -237,8 +237,20 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await p.getByRole("button", { name: "Routine", exact: true }).click();
   await expect(p.locator(".routine-workspace")).toBeVisible();
   await expect(p.locator(".monthly")).not.toBeVisible();
-  await p.getByRole("button", { name: "Add routine", exact: true }).click();
-  await p.getByPlaceholder("Name your habit").fill("Stretch");
+  // Seed an established routine so this flow still exercises historical check-ins.
+  await p.evaluate(async () => {
+    const { auth, db } = await import("/src/firebase.ts" as string);
+    const { today, shift } = await import("/src/dates.ts" as string);
+    const { doc, setDoc, serverTimestamp } = await import(
+      "/node_modules/.vite/deps/firebase_firestore.js" as string
+    );
+    await setDoc(doc(db, "users", auth.currentUser.uid, "items", crypto.randomUUID()), {
+      kind: "routine", period: "", title: "Stretch", body: "", time: "",
+      done: false, days: [0, 1, 2, 3, 4], deleted: false,
+      startDate: shift(today(), -14), updatedAt: serverTimestamp(),
+    });
+  });
+  await expect(p.getByPlaceholder("Name your habit")).toHaveValue("Stretch");
   await p.getByRole("heading", { name: "Routine", exact: true }).click();
   await p
     .getByRole("button", { name: "Previous routine week", exact: true })
@@ -517,4 +529,16 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await c.close();
   await a.close();
   await b.close();
+});
+
+
+test("new routines have no check-ins before their start date", async ({ page }) => {
+  await login(page, "routine-start-" + Date.now());
+  await page.getByRole("button", { name: "Routine", exact: true }).click();
+  await page.getByRole("button", { name: "Add routine", exact: true }).click();
+  await expect(page.locator("header [role=status]")).toHaveText("Saved");
+  await page.getByRole("button", { name: "Previous routine week", exact: true }).click();
+  await expect(page.locator(".routine-row .habit-check:disabled")).toHaveCount(7);
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await expect(page.locator(".routine-summary-count")).toContainText("0 of 0");
 });

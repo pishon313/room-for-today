@@ -106,3 +106,17 @@ it("keeps routine schedule history private to its owner", async () => {
     ),
   );
 });
+
+it("validates immutable routine start dates and keeps legacy routines editable", async () => {
+  const owner = env.authenticatedContext("alice").firestore();
+  const ref = doc(owner, "users/alice/items/new-routine");
+  const routine = { ...record(), kind: "routine", period: "", startDate: "2026-10-13" };
+  await assertSucceeds(setDoc(ref, routine));
+  await assertSucceeds(updateDoc(ref, { title: "New title", updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(ref, { startDate: "2026-10-01", updatedAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(owner, "users/alice/items/bad-start"), { ...routine, startDate: "bad" }));
+  await assertFails(setDoc(doc(owner, "users/alice/items/task-start"), { ...record(), startDate: "2026-10-13" }));
+  const legacy = doc(owner, "users/alice/items/legacy-routine");
+  await assertSucceeds(setDoc(legacy, { ...record(), kind: "routine", period: "" }));
+  await assertSucceeds(updateDoc(legacy, { days: [0, 2], updatedAt: serverTimestamp() }));
+});
