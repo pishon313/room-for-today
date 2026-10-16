@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { shift, today } from "../../src/dates";
+import { operationPayloadHash } from "../../src/outbox";
 async function expectNoBlockingSaveOverlay(page: Page) {
   await expect(page.locator(".save-notice")).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "Unsaved changes" })).toHaveCount(0);
@@ -27,6 +28,40 @@ async function cloudRecordId(uid: string, kind: string, title: string) {
   }
 }
 
+async function cloudItem(uid: string, record: string) {
+  const environment = await initializeTestEnvironment({
+    projectId: "demo-planner",
+    firestore: { host: "127.0.0.1", port: 8080 },
+  });
+  try {
+    const db = environment.authenticatedContext(uid).firestore();
+    const snap = await getDoc(doc(db, "users", uid, "items", record));
+    expect(snap.exists(), `Cloud item ${record} should exist`).toBe(true);
+    return snap.data()!;
+  } finally {
+    await environment.cleanup();
+  }
+}
+
+async function signedInUid(page: Page) {
+  return page.evaluate(async () => {
+    const { auth } = await import("/src/firebase.ts" as string);
+    return auth!.currentUser!.uid;
+  });
+}
+
+async function failPendingCleanup(page: Page) {
+  await page.evaluate(() => {
+    const original = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function (key) {
+      if (key.startsWith("planner-pending:")) {
+        throw new DOMException("Simulated cleanup failure", "QuotaExceededError");
+      }
+      return original.call(this, key);
+    };
+  });
+}
+
 async function injectRejectedMemoEdit(page: Page, record: string, body: string) {
   await page.evaluate(async ({ record, body }) => {
     const { auth } = await import("/src/firebase.ts" as string);
@@ -35,6 +70,7 @@ async function injectRejectedMemoEdit(page: Page, record: string, body: string) 
       `planner-pending:${auth!.currentUser!.uid}:${id}`,
       JSON.stringify({
         id,
+        protocol: 2,
         record,
         patch: { body, time: "99:99" },
         at: Date.now() + 1,
@@ -383,11 +419,12 @@ test("cloud persistence, live sync, independent edits, routines, bucket list, of
     firestore: { host: "127.0.0.1", port: 8080 },
   });
   try {
-    const ownerDb = testEnvironment.authenticatedContext(actualUid).firestore();
-    await setDoc(doc(ownerDb, "users", actualUid, "items", crypto.randomUUID()), {
-      kind: "routine", period: "", title: "Stretch", body: "", time: "",
-      done: false, days: [0, 1, 2, 3, 4], deleted: false,
-      startDate: shift(today(), -14), updatedAt: serverTimestamp(),
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "users", actualUid, "items", crypto.randomUUID()), {
+        kind: "routine", period: "", title: "Stretch", body: "", time: "",
+        done: false, days: [0, 1, 2, 3, 4], deleted: false,
+        startDate: shift(today(), -14), updatedAt: serverTimestamp(),
+      });
     });
   } finally {
     await testEnvironment.cleanup();
@@ -573,6 +610,7 @@ test("cloud persistence, live sync, independent edits, routines, bucket list, of
       "planner-pending:" + auth.currentUser.uid + ":" + id,
       JSON.stringify({
         id,
+        protocol: 2,
         record: noteRecord,
         patch: { body: "Rejected edit is preserved", time: "99:99" },
         at: Date.now(),
@@ -741,12 +779,6 @@ test("a rejected memo stays recoverable while valid records sync and selective d
   const page = await first.newPage();
   const other = await second.newPage();
   const uid = "rejected-memo-" + crypto.randomUUID();
-  const writeRequests: string[] = [];
-  page.on("request", (request) => {
-    if (request.url().includes("/google.firestore.v1.Firestore/Write/channel")) {
-      writeRequests.push(request.url());
-    }
-  });
   try {
     await login(page, uid);
     await login(other, uid);
@@ -813,9 +845,25 @@ test("a rejected memo stays recoverable while valid records sync and selective d
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Rejected edit is still here");
     await memoRecovery.locator("details summary").click();
     await expect(memoRecovery.locator("details")).toHaveAttribute("open", "");
-    const beforeRetryRequests = writeRequests.length;
+    await page.evaluate((record) => {
+      const state = window as Window & { plannerRetryDisabled?: boolean[] };
+      state.plannerRetryDisabled = [];
+      const recordState = () => {
+        const item = document.querySelector(`.save-recovery-item[data-record-id="${record}"]`);
+        const retry = [...(item?.querySelectorAll("button") || [])]
+          .find((button) => button.textContent?.trim() === "Retry");
+        state.plannerRetryDisabled!.push(Boolean(retry?.disabled));
+      };
+      new MutationObserver(recordState).observe(document.body, {
+        subtree: true, childList: true, attributes: true, attributeFilter: ["disabled"],
+      });
+      recordState();
+    }, memoId);
     await memoRecovery.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect.poll(() => writeRequests.length).toBeGreaterThan(beforeRetryRequests);
+    await expect.poll(() => page.evaluate(() =>
+      (window as Window & { plannerRetryDisabled?: boolean[] }).plannerRetryDisabled?.includes(true),
+    )).toBe(true);
+    await expect(memoRecovery.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
     await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
     if (!(await recovery.isVisible())) {
       await page.locator(".save-state-trigger").click();
@@ -919,6 +967,292 @@ test("memory-only edits survive storage quota errors, Retry, and another edit", 
     await expect(page.locator("header [role=status]")).toHaveText("Saved");
     await expect(other.getByPlaceholder("Note title")).toHaveValue("Quota memo edited later");
     await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Memory-only thought");
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test("a confirmed edit whose queue cleanup failed cannot replay over a newer device edit", async ({ browser }) => {
+  test.setTimeout(90000);
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "replay-cleanup-" + crypto.randomUUID();
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("Replay memo");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    await expect(other.getByPlaceholder("Note title")).toHaveValue("Replay memo");
+
+    const actualUid = await signedInUid(page);
+    const record = await cloudRecordId(actualUid, "memo", "Replay memo");
+    await failPendingCleanup(page);
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Older text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older text");
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    expect((await cloudItem(actualUid, record)).body).toBe("Older text");
+
+    await other.getByPlaceholder("Let your thoughts land here…").fill("Newer text");
+    await expect(other.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Newer text");
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test("a server commit with lost client confirmation is deduplicated on retry", async ({ browser }) => {
+  test.setTimeout(90000);
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "replay-lost-ack-" + crypto.randomUUID();
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("Lost acknowledgment memo");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    const actualUid = await signedInUid(page);
+    const record = await cloudRecordId(actualUid, "memo", "Lost acknowledgment memo");
+
+    // Fault injection: keep the actual UI edit in A's durable queue, while
+    // atomically representing the server-side commit whose response A lost.
+    await first.setOffline(true);
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Committed without acknowledgment");
+    const queued = await page.evaluate((uid) => Object.keys(localStorage)
+      .filter((key) => key.startsWith(`planner-pending:${uid}:`))
+      .map((key) => JSON.parse(localStorage.getItem(key)!))
+      .find((op) => op.patch.body === "Committed without acknowledgment"), actualUid);
+    expect(queued).toMatchObject({ protocol: 2, record });
+    const payloadHash = await operationPayloadHash(queued);
+    const environment = await initializeTestEnvironment({
+      projectId: "demo-planner",
+      firestore: { host: "127.0.0.1", port: 8080 },
+    });
+    try {
+      await environment.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        const batch = writeBatch(db);
+        batch.set(doc(db, "users", actualUid, "items", record), {
+          body: "Committed without acknowledgment", lastOpId: queued.id,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+        batch.set(doc(db, "users", actualUid, "appliedOps", queued.id), {
+          record, payloadHash, appliedAt: serverTimestamp(),
+        });
+        await batch.commit();
+      });
+    } finally {
+      await environment.cleanup();
+    }
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Committed without acknowledgment");
+    await other.getByPlaceholder("Let your thoughts land here…").fill("Newer text");
+    await expect(other.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+
+    await first.setOffline(false);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Newer text");
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test("a confirmed operation mixed with a new queued field edit cannot restore stale text", async ({ browser }) => {
+  test.setTimeout(90000);
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "replay-mixed-" + crypto.randomUUID();
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("Mixed memo");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    const actualUid = await signedInUid(page);
+    const record = await cloudRecordId(actualUid, "memo", "Mixed memo");
+    await failPendingCleanup(page);
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Older text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older text");
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    await other.getByPlaceholder("Let your thoughts land here…").fill("Newer text");
+    await expect(other.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+
+    // Keep the genuine new title edit queued until reload, so the persisted
+    // old body and new title appear together in the same pending outbox.
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });
+    });
+    await page.getByPlaceholder("Note title").fill("Fresh title");
+    await expect(page.getByPlaceholder("Note title")).toHaveValue("Fresh title");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    const saved = await cloudItem(actualUid, record);
+    expect(saved.title).toBe("Fresh title");
+    expect(saved.body).toBe("Newer text");
+    await expect(other.getByPlaceholder("Note title")).toHaveValue("Fresh title");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Newer text");
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test("two tabs sharing one pending operation cannot replay it over a newer device edit", async ({ browser }) => {
+  test.setTimeout(90000);
+  const shared = await browser.newContext();
+  const independent = await browser.newContext();
+  const first = await shared.newPage();
+  const second = await shared.newPage();
+  const other = await independent.newPage();
+  const uid = "replay-tabs-" + crypto.randomUUID();
+  try {
+    await login(first, uid);
+    await login(second, uid);
+    await login(other, uid);
+    for (const page of [first, second, other]) {
+      await page.getByRole("button", { name: "Memo", exact: true }).click();
+    }
+    await first.getByRole("button", { name: "New note", exact: true }).click();
+    await first.getByPlaceholder("Note title").fill("Shared queue memo");
+    await expect(first.locator("header [role=status]")).toHaveText("Saved");
+    await expect(second.getByPlaceholder("Note title")).toHaveValue("Shared queue memo");
+    await expect(other.getByPlaceholder("Note title")).toHaveValue("Shared queue memo");
+    const actualUid = await signedInUid(first);
+    const record = await cloudRecordId(actualUid, "memo", "Shared queue memo");
+    await failPendingCleanup(first);
+    await failPendingCleanup(second);
+    await first.getByPlaceholder("Let your thoughts land here…").fill("Older text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older text");
+    await expect(first.locator("header [role=status]")).toHaveText("Couldn’t save");
+    await other.getByPlaceholder("Let your thoughts land here…").fill("Newer text");
+    await expect(other.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+
+    await second.reload({ waitUntil: "domcontentloaded" });
+    await first.reload({ waitUntil: "domcontentloaded" });
+    await expect(first.locator("header [role=status]")).toHaveText("Saved");
+    await expect(second.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Newer text");
+  } finally {
+    await shared.close();
+    await independent.close();
+  }
+});
+
+test("a deliberate new edit can restore earlier text", async ({ browser }) => {
+  test.setTimeout(60000);
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "replay-revert-" + crypto.randomUUID();
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("Deliberate restore");
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Older text");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    const actualUid = await signedInUid(page);
+    const record = await cloudRecordId(actualUid, "memo", "Deliberate restore");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older text");
+
+    await other.getByPlaceholder("Let your thoughts land here…").fill("Newer text");
+    await expect(other.locator("header [role=status]")).toHaveText("Saved");
+    await page.getByRole("heading", { name: "Memo", exact: true }).click();
+    await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Newer text");
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Older text");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Older text");
+    await other.getByRole("heading", { name: "Memo", exact: true }).click();
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older text");
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test("a legacy pending edit is quarantined instead of silently replaying over newer cloud text", async ({ browser }) => {
+  test.setTimeout(60000);
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "replay-legacy-" + crypto.randomUUID();
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("Legacy memo");
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Older text");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    const actualUid = await signedInUid(page);
+    const record = await cloudRecordId(actualUid, "memo", "Legacy memo");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older text");
+    await other.getByPlaceholder("Let your thoughts land here…").fill("Newer text");
+    await expect(other.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+
+    await page.evaluate(({ record, uid }) => {
+      const id = crypto.randomUUID();
+      localStorage.setItem(`planner-pending:${uid}:${id}`, JSON.stringify({
+        id, record, patch: { body: "Older legacy draft" }, at: Date.now(),
+      }));
+    }, { record, uid: actualUid });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Newer text");
+    await page.locator(".save-state-trigger").click();
+    const pending = page.getByRole("dialog", { name: "Unsaved changes" }).locator(".save-recovery-item");
+    await expect(pending).toContainText("Older pending edit · Review before applying");
+    await expect(pending).toContainText("Current cloud item");
+    await expect(pending).toContainText("Pending content");
+    await expect(pending.locator("textarea[readonly]").last()).toHaveValue(/Older legacy draft/);
+    let confirmation = "";
+    page.once("dialog", async (dialog) => {
+      confirmation = dialog.message();
+      await dialog.dismiss();
+    });
+    await pending.getByRole("button", { name: "Apply as new edit" }).click();
+    expect(confirmation).toContain("Legacy memo");
+    expect((await cloudItem(actualUid, record)).body).toBe("Newer text");
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    page.once("dialog", (dialog) => dialog.accept());
+    await pending.getByRole("button", { name: "Apply as new edit" }).click();
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    expect((await cloudItem(actualUid, record)).body).toBe("Older legacy draft");
+    await other.getByRole("heading", { name: "Memo", exact: true }).click();
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Older legacy draft");
   } finally {
     await first.close();
     await second.close();

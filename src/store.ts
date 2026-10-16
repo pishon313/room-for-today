@@ -3,12 +3,12 @@ import {
   collection,
   doc,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
-  setDoc,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { today } from "./dates";
-import { Outbox, type Op, type UnreadableOp } from "./outbox";
+import { Outbox, operationPayloadHash, type Op, type UnreadableOp } from "./outbox";
 export type Kind =
   | "monthly"
   | "weekly"
@@ -34,15 +34,17 @@ export type Item = {
 };
 export type SaveIssue = {
   record: string;
-  kind: "rejected" | "temporary" | "cleanup";
+  kind: "rejected" | "temporary" | "cleanup" | "legacy" | "conflict";
   code: string;
   detail: string;
 };
 export type PendingRecord = {
   record: string;
   item: Partial<Item>;
+  cloudItem?: Partial<Item>;
   changes: number;
   saving: boolean;
+  legacy: boolean;
   issue?: SaveIssue;
 };
 type TrackedIssue = SaveIssue & { signature: string };
@@ -59,10 +61,53 @@ function classifyError(error: unknown): Omit<SaveIssue, "record"> {
       ? String(error.code)
       : "unknown";
   return {
-    kind: persistentCodes.has(code) ? "rejected" : "temporary",
+    kind: code === "op-conflict"
+      ? "conflict"
+      : code === "legacy-operation"
+        ? "legacy"
+        : persistentCodes.has(code)
+          ? "rejected"
+          : "temporary",
     code,
     detail: error instanceof Error ? error.message : String(error),
   };
+}
+
+class OperationConflict extends Error {
+  code = "op-conflict";
+  constructor() {
+    super("This pending operation ID already belongs to different content. Copy and review the pending text before discarding it.");
+  }
+}
+
+// The marker and item patch commit together. An identical retry performs no
+// item write, even after a restart or when another device has edited it.
+export async function applyOperation(uid: string, op: Op): Promise<void> {
+  if (op.protocol !== 2)
+    throw Object.assign(new Error("An older pending edit needs review before it can be applied."), { code: "legacy-operation" });
+  if (!db) throw new Error("Cloud storage is unavailable.");
+  const payloadHash = await operationPayloadHash(op);
+  const markerRef = doc(db, "users", uid, "appliedOps", op.id);
+  const itemRef = doc(db, "users", uid, "items", op.record);
+  await runTransaction(db, async (transaction) => {
+    const marker = await transaction.get(markerRef);
+    if (marker.exists()) {
+      const saved = marker.data();
+      if (saved.record !== op.record || saved.payloadHash !== payloadHash)
+        throw new OperationConflict();
+      return;
+    }
+    transaction.set(itemRef, {
+      ...op.patch,
+      lastOpId: op.id,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    transaction.set(markerRef, {
+      record: op.record,
+      payloadHash,
+      appliedAt: serverTimestamp(),
+    });
+  });
 }
 const signature = (ids: string[]) => ids.join("|");
 export function batches(ops: Op[]) {
@@ -99,6 +144,9 @@ export function usePlanner(uid: string | undefined) {
     async () => false,
   );
   const discardUnreadableRef = useRef<(key: string) => Promise<boolean>>(
+    async () => false,
+  );
+  const promoteRef = useRef<(record: string) => Promise<boolean>>(
     async () => false,
   );
   const getOutbox = (account: string) => {
@@ -203,45 +251,65 @@ export function usePlanner(uid: string | undefined) {
             setCleanupError("Cloud saving succeeded, but device storage could not clear its pending copy. Retry when storage is available.");
           for (const initial of batches(refresh().filter((op) => !outbox.confirmedIds().includes(op.id)))) {
             if (!alive) break;
-            const op = batches(outbox.snapshot().filter((queued) => !outbox.confirmedIds().includes(queued.id))).find(
-              (group) => group.record === initial.record,
+            const queue = outbox.snapshot().filter((queued) =>
+              queued.record === initial.record && !outbox.confirmedIds().includes(queued.id),
             );
-            if (!op || discarding.has(op.record)) continue;
-            const previous = failures.get(op.record);
+            if (!queue.length || discarding.has(initial.record)) continue;
+            const queueSignature = signature(queue.map((op) => op.id));
+            if (queue.some((op) => op.protocol !== 2)) {
+              failures.set(initial.record, {
+                record: initial.record,
+                kind: "legacy",
+                code: "older-pending-edit",
+                detail: "This edit predates replay protection and may already be in the cloud. Review the saved and pending content, then choose Apply as new edit or discard it.",
+                signature: queueSignature,
+              });
+              publishIssues();
+              continue;
+            }
+            const previous = failures.get(initial.record);
             if (
-              previous?.kind === "rejected" &&
-              previous.signature === signature(op.ids) &&
+              (previous?.kind === "rejected" || previous?.kind === "conflict") &&
+              previous.signature === queueSignature &&
               !retryEverything &&
-              !retryThese.has(op.record)
+              !retryThese.has(initial.record)
             )
               continue;
-            uploading.add(op.record);
-            setSavingRecords([op.record]);
+            uploading.add(initial.record);
+            setSavingRecords([initial.record]);
             const slow = setTimeout(() => {
               if (alive)
                 setSlowWarning("The server has not confirmed this save yet.");
             }, 12000);
             try {
-              await setDoc(
-                doc(db!, "users", uid, "items", op.record),
-                { ...op.patch, updatedAt: serverTimestamp() },
-                { merge: true },
-              );
-              const uncleared = outbox.acknowledge(op.ids);
-              if (uncleared.length)
-                setCleanupError("Cloud saving succeeded, but device storage could not clear its pending copy. Retry when storage is available.");
-              failures.delete(op.record);
-              publishIssues();
-            } catch (error) {
-              failures.set(op.record, {
-                record: op.record,
-                ...classifyError(error),
-                signature: signature(op.ids),
-              });
-              publishIssues();
+              // Do not fold these patches into a single write. Every identity
+              // must be checked at the server before its own patch can apply.
+              for (const queued of queue) {
+                if (!outbox.snapshot().some((op) => op.id === queued.id)) continue;
+                try {
+                  await applyOperation(uid, queued);
+                  const uncleared = outbox.acknowledge([queued.id]);
+                  if (uncleared.length)
+                    setCleanupError("Cloud saving succeeded, but device storage could not clear its pending copy. Retry when storage is available.");
+                  failures.delete(initial.record);
+                  publishIssues();
+                } catch (error) {
+                  failures.set(initial.record, {
+                    record: initial.record,
+                    ...classifyError(error),
+                    signature: signature(
+                      outbox.snapshot().filter((op) =>
+                        op.record === initial.record && !outbox.confirmedIds().includes(op.id),
+                      ).map((op) => op.id),
+                    ),
+                  });
+                  publishIssues();
+                  break; // Keep later edits to this item in order.
+                }
+              }
             } finally {
               clearTimeout(slow);
-              uploading.delete(op.record);
+              uploading.delete(initial.record);
               if (alive) {
                 setSlowWarning("");
                 setSavingRecords([]);
@@ -313,6 +381,29 @@ export function usePlanner(uid: string | undefined) {
         return false;
       }
     };
+    promoteRef.current = async (record) => {
+      if (uploading.has(record)) return false;
+      try {
+        const promoted = await navigator.locks.request("planner-sync:" + uid, () => {
+          const durable = outbox.promoteRecord(record);
+          refresh();
+          if (durable) {
+            failures.delete(record);
+            publishIssues();
+            setActionError("");
+          } else {
+            setActionError("Couldn’t prepare this older edit safely in device storage. Copy it or restore storage access, then try again.");
+          }
+          return durable;
+        });
+        if (promoted) void flush();
+        return promoted;
+      } catch {
+        if (alive)
+          setActionError("Couldn’t prepare this older edit safely. Please try again.");
+        return false;
+      }
+    };
     const unsub = onSnapshot(
       collection(db, "users", uid, "items"),
       { includeMetadataChanges: true },
@@ -352,6 +443,7 @@ export function usePlanner(uid: string | undefined) {
       retryRef.current = () => {};
       discardRef.current = async () => false;
       discardUnreadableRef.current = async () => false;
+      promoteRef.current = async () => false;
     };
   }, [uid, restart]);
   const patch = (record: string, data: Partial<Item>) => {
@@ -397,6 +489,7 @@ export function usePlanner(uid: string | undefined) {
   const activeOps = ops.filter((op) => !confirmedSet.has(op.id));
   const pendingRecords: PendingRecord[] = batches(ops).map((group) => ({
     record: group.record,
+    cloudItem: cloud.find((item) => item.id === group.record),
     item: {
       ...cloud.find((item) => item.id === group.record),
       ...group.patch,
@@ -404,6 +497,7 @@ export function usePlanner(uid: string | undefined) {
     },
     changes: group.ids.length,
     saving: savingRecords.includes(group.record),
+    legacy: ops.some((op) => op.record === group.record && op.protocol !== 2),
     issue: issues.find((issue) => issue.record === group.record) ||
       (group.ids.every((id) => confirmedSet.has(id))
         ? {
@@ -416,6 +510,8 @@ export function usePlanner(uid: string | undefined) {
   }));
   const error = issues.length
     ? `${issues.length} item${issues.length === 1 ? "" : "s"} couldn’t be saved. Your edits remain on this device.`
+    : activeOps.some((op) => op.protocol !== 2)
+      ? "Older pending edits need review before they can be uploaded safely."
     : unreadable.length
       ? "Some pending edits couldn’t be read from device storage. Review them before leaving."
       : cleanupError || actionError || storageError || syncError || loadError;
@@ -424,6 +520,7 @@ export function usePlanner(uid: string | undefined) {
     patch,
     add,
     ready,
+    cloudConfirmed: confirmed,
     error,
     loadError,
     loadDetail,
@@ -455,5 +552,6 @@ export function usePlanner(uid: string | undefined) {
     },
     discard: (record: string) => discardRef.current(record),
     discardUnreadable: (key: string) => discardUnreadableRef.current(key),
+    applyLegacy: (record: string) => promoteRef.current(record),
   };
 }

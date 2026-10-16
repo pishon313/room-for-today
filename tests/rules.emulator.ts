@@ -11,8 +11,12 @@ import {
   getDoc,
   serverTimestamp,
   updateDoc,
+  deleteDoc,
   collection,
   getDocs,
+  writeBatch,
+  type DocumentReference,
+  type Firestore,
 } from "firebase/firestore";
 import { beforeAll, afterAll, it } from "vitest";
 let env: RulesTestEnvironment;
@@ -58,16 +62,34 @@ const bucketRecord = () => ({
   createdAt: 1791072000000,
   completedAt: "",
 });
-it("allows owner CRUD and rejects another account and anonymous access", async () => {
-  const own = doc(
-    env.authenticatedContext("alice").firestore(),
-    "users/alice/items/test",
-  );
-  await assertSucceeds(setDoc(own, record()));
+const payloadHash = "a".repeat(64);
+// A planner write and its replay marker must commit together. Keep all
+// existing validation cases using this pair so they test their actual rules.
+function pairedWrite(
+  firestore: Firestore,
+  uid: string,
+  reference: DocumentReference,
+  patch: Record<string, unknown>,
+  opId = crypto.randomUUID(),
+) {
+  const batch = writeBatch(firestore);
+  batch.set(reference, { ...patch, lastOpId: opId, updatedAt: serverTimestamp() }, { merge: true });
+  batch.set(doc(firestore, "users", uid, "appliedOps", opId), {
+    record: reference.id,
+    payloadHash,
+    appliedAt: serverTimestamp(),
+  });
+  return batch.commit();
+}
+it("allows owner edits and rejects hard deletion, another account, and anonymous access", async () => {
+  const alice = env.authenticatedContext("alice").firestore();
+  const own = doc(alice, "users/alice/items/test");
+  await assertSucceeds(pairedWrite(alice, "alice", own, record()));
   await assertSucceeds(getDoc(own));
   await assertSucceeds(
-    updateDoc(own, { title: "Edited", updatedAt: serverTimestamp() }),
+    pairedWrite(alice, "alice", own, { title: "Edited" }),
   );
+  await assertFails(deleteDoc(own));
   for (const context of [
     env.authenticatedContext("bob"),
     env.unauthenticatedContext(),
@@ -76,7 +98,7 @@ it("allows owner CRUD and rejects another account and anonymous access", async (
       getDoc(doc(context.firestore(), "users/alice/items/test")),
     );
     await assertFails(
-      setDoc(doc(context.firestore(), "users/alice/items/new"), record()),
+      pairedWrite(context.firestore(), "alice", doc(context.firestore(), "users/alice/items/new"), record()),
     );
     await assertFails(
       getDocs(collection(context.firestore(), "users/alice/items")),
@@ -84,18 +106,16 @@ it("allows owner CRUD and rejects another account and anonymous access", async (
   }
 });
 it("rejects invalid fields and resurrecting a deleted record", async () => {
-  const ref = doc(
-    env.authenticatedContext("alice").firestore(),
-    "users/alice/items/validation",
-  );
-  await assertFails(setDoc(ref, { ...record(), unexpected: true }));
-  await assertFails(setDoc(ref, { ...record(), time: "35:90" }));
-  await assertSucceeds(setDoc(ref, record()));
+  const alice = env.authenticatedContext("alice").firestore();
+  const ref = doc(alice, "users/alice/items/validation");
+  await assertFails(pairedWrite(alice, "alice", ref, { ...record(), unexpected: true }));
+  await assertFails(pairedWrite(alice, "alice", ref, { ...record(), time: "35:90" }));
+  await assertSucceeds(pairedWrite(alice, "alice", ref, record()));
   await assertSucceeds(
-    updateDoc(ref, { deleted: true, updatedAt: serverTimestamp() }),
+    pairedWrite(alice, "alice", ref, { deleted: true }),
   );
   await assertFails(
-    updateDoc(ref, { deleted: false, updatedAt: serverTimestamp() }),
+    pairedWrite(alice, "alice", ref, { deleted: false }),
   );
 });
 it("keeps routine schedule history private to its owner", async () => {
@@ -104,8 +124,8 @@ it("keeps routine schedule history private to its owner", async () => {
   const baseline = doc(owner, "users/alice/items/routine-id_schedule_initial");
   const change = doc(owner, "users/alice/items/routine-id_schedule_2026-10-01");
 
-  await assertSucceeds(setDoc(baseline, scheduleRecord("0001-01-01")));
-  await assertSucceeds(setDoc(change, scheduleRecord("2026-10-01")));
+  await assertSucceeds(pairedWrite(owner, "alice", baseline, scheduleRecord("0001-01-01")));
+  await assertSucceeds(pairedWrite(owner, "alice", change, scheduleRecord("2026-10-01")));
   await assertSucceeds(getDoc(baseline));
   await assertFails(
     getDoc(doc(other, "users/alice/items/routine-id_schedule_initial")),
@@ -122,35 +142,37 @@ it("validates immutable routine start dates and keeps legacy routines editable",
   const owner = env.authenticatedContext("alice").firestore();
   const ref = doc(owner, "users/alice/items/new-routine");
   const routine = { ...record(), kind: "routine", period: "", startDate: "2026-10-13" };
-  await assertSucceeds(setDoc(ref, routine));
-  await assertSucceeds(updateDoc(ref, { title: "New title", updatedAt: serverTimestamp() }));
-  await assertFails(updateDoc(ref, { startDate: "2026-10-01", updatedAt: serverTimestamp() }));
-  await assertFails(setDoc(doc(owner, "users/alice/items/bad-start"), { ...routine, startDate: "bad" }));
-  await assertFails(setDoc(doc(owner, "users/alice/items/task-start"), { ...record(), startDate: "2026-10-13" }));
+  await assertSucceeds(pairedWrite(owner, "alice", ref, routine));
+  await assertSucceeds(pairedWrite(owner, "alice", ref, { title: "New title" }));
+  await assertFails(pairedWrite(owner, "alice", ref, { startDate: "2026-10-01" }));
+  await assertFails(pairedWrite(owner, "alice", doc(owner, "users/alice/items/bad-start"), { ...routine, startDate: "bad" }));
+  await assertFails(pairedWrite(owner, "alice", doc(owner, "users/alice/items/task-start"), { ...record(), startDate: "2026-10-13" }));
   const legacy = doc(owner, "users/alice/items/legacy-routine");
-  await assertSucceeds(setDoc(legacy, { ...record(), kind: "routine", period: "" }));
-  await assertSucceeds(updateDoc(legacy, { days: [0, 2], updatedAt: serverTimestamp() }));
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users/alice/items/legacy-routine"), {
+      ...record(), kind: "routine", period: "",
+    });
+  });
+  await assertSucceeds(pairedWrite(owner, "alice", legacy, { days: [0, 2] }));
 });
 
 it("allows a bucket item to be edited and completed while keeping it private", async () => {
   const owner = env.authenticatedContext("alice").firestore();
   const other = env.authenticatedContext("bob").firestore();
   const ref = doc(owner, "users/alice/items/bucket-valid");
-  await assertSucceeds(setDoc(ref, bucketRecord()));
-  await assertSucceeds(updateDoc(ref, { body: "Travel in winter", updatedAt: serverTimestamp() }));
-  await assertSucceeds(updateDoc(ref, {
+  await assertSucceeds(pairedWrite(owner, "alice", ref, bucketRecord()));
+  await assertSucceeds(pairedWrite(owner, "alice", ref, { body: "Travel in winter" }));
+  await assertSucceeds(pairedWrite(owner, "alice", ref, {
     done: true,
     completedAt: "2026-10-16",
-    updatedAt: serverTimestamp(),
   }));
-  await assertSucceeds(updateDoc(ref, {
+  await assertSucceeds(pairedWrite(owner, "alice", ref, {
     done: false,
     completedAt: "",
-    updatedAt: serverTimestamp(),
   }));
   await assertSucceeds(getDoc(ref));
   await assertFails(getDoc(doc(other, "users/alice/items/bucket-valid")));
-  await assertFails(setDoc(doc(other, "users/alice/items/bucket-other"), bucketRecord()));
+  await assertFails(pairedWrite(other, "alice", doc(other, "users/alice/items/bucket-other"), bucketRecord()));
 });
 
 it("rejects invalid bucket metadata and protects the creation date", async () => {
@@ -159,20 +181,50 @@ it("rejects invalid bucket metadata and protects the creation date", async () =>
   const bucket = bucketRecord();
   const missingCreatedAt: Record<string, unknown> = { ...bucket };
   delete missingCreatedAt.createdAt;
-  await assertFails(setDoc(ref, { ...bucket, period: "2026-10-16" }));
-  await assertFails(setDoc(ref, missingCreatedAt));
-  await assertFails(setDoc(ref, { ...bucket, createdAt: "2026-10-16" }));
-  await assertFails(setDoc(ref, { ...bucket, completedAt: "October 16" }));
-  await assertFails(setDoc(ref, { ...bucket, done: true, completedAt: "2026-13-16" }));
-  await assertFails(setDoc(ref, { ...bucket, done: true, completedAt: "2026-10-32" }));
-  await assertFails(setDoc(ref, { ...bucket, completedAt: "2026-10-16" }));
-  await assertFails(setDoc(ref, { ...bucket, done: true }));
-  await assertFails(setDoc(doc(owner, "users/alice/items/daily-bucket-fields"), {
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, period: "2026-10-16" }));
+  await assertFails(pairedWrite(owner, "alice", ref, missingCreatedAt));
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, createdAt: "2026-10-16" }));
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, completedAt: "October 16" }));
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, done: true, completedAt: "2026-13-16" }));
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, done: true, completedAt: "2026-10-32" }));
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, completedAt: "2026-10-16" }));
+  await assertFails(pairedWrite(owner, "alice", ref, { ...bucket, done: true }));
+  await assertFails(pairedWrite(owner, "alice", doc(owner, "users/alice/items/daily-bucket-fields"), {
     ...record(),
     createdAt: bucket.createdAt,
     completedAt: "",
   }));
-  await assertSucceeds(setDoc(ref, bucket));
-  await assertFails(updateDoc(ref, { createdAt: bucket.createdAt + 1, updatedAt: serverTimestamp() }));
-  await assertFails(updateDoc(ref, { done: true, updatedAt: serverTimestamp() }));
+  await assertSucceeds(pairedWrite(owner, "alice", ref, bucket));
+  await assertFails(pairedWrite(owner, "alice", ref, { createdAt: bucket.createdAt + 1 }));
+  await assertFails(pairedWrite(owner, "alice", ref, { done: true }));
+});
+
+it("requires the item and immutable replay marker to be written atomically", async () => {
+  const owner = env.authenticatedContext("alice").firestore();
+  const other = env.authenticatedContext("bob").firestore();
+  const ref = doc(owner, "users/alice/items/replay-pair");
+  const opId = crypto.randomUUID();
+  const marker = doc(owner, "users/alice/appliedOps", opId);
+  await assertFails(setDoc(ref, { ...record(), lastOpId: opId }));
+  await assertFails(setDoc(marker, {
+    record: ref.id, payloadHash, appliedAt: serverTimestamp(),
+  }));
+  const mismatchedId = crypto.randomUUID();
+  const mismatched = writeBatch(owner);
+  mismatched.set(ref, { ...record(), lastOpId: mismatchedId });
+  mismatched.set(doc(owner, "users/alice/appliedOps", mismatchedId), {
+    record: "another-item", payloadHash, appliedAt: serverTimestamp(),
+  });
+  await assertFails(mismatched.commit());
+  await assertSucceeds(pairedWrite(owner, "alice", ref, record(), opId));
+  await assertSucceeds(getDoc(marker));
+  await assertFails(updateDoc(marker, { payloadHash: "b".repeat(64) }));
+  await assertFails(deleteDoc(marker));
+  await assertFails(getDoc(doc(other, "users/alice/appliedOps", opId)));
+  await assertFails(setDoc(doc(other, "users/alice/appliedOps", crypto.randomUUID()), {
+    record: ref.id, payloadHash, appliedAt: serverTimestamp(),
+  }));
+  await assertFails(setDoc(ref, {
+    title: "A replay cannot reuse the marker", lastOpId: opId, updatedAt: serverTimestamp(),
+  }, { merge: true }));
 });

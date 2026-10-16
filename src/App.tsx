@@ -688,7 +688,7 @@ export default function App() {
                   </h2>
                   <p>
                     {store.pendingCount
-                      ? "Your local edits are listed below. Keep this device until they save, or copy them before discarding. Other items sync independently when connected."
+                      ? "Your local edits are listed below. Keep this device until they save, or copy them before discarding. Older edits need review before they can be applied again. Other items sync independently."
                       : store.loadError
                         ? "Cloud plans could not be loaded. Try again when your connection is ready."
                         : !user
@@ -743,18 +743,39 @@ export default function App() {
                     >
                       <h3>{title}</h3>
                       <p>
-                        {pending.issue?.kind === "rejected"
-                          ? "Rejected by server · Needs attention"
-                          : pending.issue?.kind === "temporary"
-                            ? "Temporary save problem · Will retry automatically"
-                            : pending.issue?.kind === "cleanup"
-                              ? "Cloud saved · Device copy needs cleanup"
-                            : pending.saving
-                              ? "Saving…"
-                              : "Waiting for server confirmation"}
+                        {pending.legacy
+                          ? "Older pending edit · Review before applying"
+                          : pending.issue?.kind === "conflict"
+                            ? "Operation conflict · Review and copy this edit"
+                            : pending.issue?.kind === "rejected"
+                              ? "Rejected by server · Needs attention"
+                              : pending.issue?.kind === "temporary"
+                                ? "Temporary save problem · Will retry automatically"
+                                : pending.issue?.kind === "cleanup"
+                                  ? "Cloud saved · Device copy needs cleanup"
+                                  : pending.saving
+                                    ? "Saving…"
+                                    : "Waiting for server confirmation"}
                       </p>
+                      {pending.legacy && (
+                        <div className="save-recovery-content">
+                          <label htmlFor={`saved-${pending.record}`}>Current cloud item</label>
+                          <textarea
+                            id={`saved-${pending.record}`}
+                            readOnly
+                            aria-label={`Current cloud content for ${title}`}
+                            value={!store.cloudConfirmed
+                              ? "Waiting for current cloud content…"
+                              : pending.cloudItem
+                                ? JSON.stringify(pending.cloudItem, null, 2)
+                                : "No saved cloud item"}
+                          />
+                        </div>
+                      )}
                       <div className="save-recovery-content">
+                        <label htmlFor={`pending-${pending.record}`}>Pending content</label>
                         <textarea
+                          id={`pending-${pending.record}`}
                           readOnly
                           aria-label={`Unsaved content for ${title}`}
                           value={content}
@@ -767,13 +788,27 @@ export default function App() {
                         >
                           {copiedRecord === pending.record ? "Copied" : "Copy"}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => store.retry(pending.record)}
-                          disabled={pending.saving}
-                        >
-                          Retry
-                        </button>
+                        {pending.legacy ? (
+                          <button
+                            type="button"
+                            disabled={pending.saving || !store.cloudConfirmed}
+                            onClick={() => {
+                              if (confirm(
+                                `Apply this older pending edit for ${title} as a new edit? It may replace newer cloud content in the same fields. Review and copy both versions first if needed.`,
+                              )) void store.applyLegacy(pending.record);
+                            }}
+                          >
+                            Apply as new edit
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => store.retry(pending.record)}
+                            disabled={pending.saving}
+                          >
+                            Retry
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={pending.saving}

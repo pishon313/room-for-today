@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Outbox, pending } from "../src/outbox";
+import { Outbox, operationPayloadHash, pending } from "../src/outbox";
 import { batches, project } from "../src/store";
 
 let storage: Record<string, string>;
@@ -147,4 +147,43 @@ it("isolates a corrupt durable entry and discards only that entry", () => {
   expect(queue.discardUnreadable(badKey)).toBe(true);
   expect(queue.snapshot()).toHaveLength(1);
   expect(queue.readIssues()).toEqual([]);
+});
+
+it("keeps one stable operation identity and replay protocol after a new Outbox instance", () => {
+  const first = new Outbox("alice");
+  first.enqueue("memo", { body: "Older text" });
+  const op = first.snapshot()[0];
+  expect(op.protocol).toBe(2);
+  expect(new Outbox("alice").snapshot()).toEqual([op]);
+  first.acknowledge([op.id]);
+  const next = new Outbox("alice");
+  next.enqueue("memo", { body: "Older text" });
+  expect(next.snapshot()[0].id).not.toBe(op.id);
+});
+
+it("binds replay hashes to record and canonical patch values, not key order", async () => {
+  const first = { record: "memo", patch: { title: "A", body: "B" } };
+  expect(await operationPayloadHash(first)).toBe(await operationPayloadHash({
+    record: "memo", patch: { body: "B", title: "A" },
+  }));
+  expect(await operationPayloadHash(first)).not.toBe(await operationPayloadHash({
+    record: "another-memo", patch: first.patch,
+  }));
+  expect(await operationPayloadHash(first)).not.toBe(await operationPayloadHash({
+    record: "memo", patch: { title: "A", body: "C" },
+  }));
+});
+
+it("keeps legacy queue entries quarantined until explicit durable promotion", () => {
+  const id = "5c201c26-e771-4cbc-b23a-7777a16d6466";
+  const key = `planner-pending:alice:${id}`;
+  storage[key] = JSON.stringify({ id, record: "memo", patch: { body: "legacy" }, at: 1 });
+  const queue = new Outbox("alice");
+  expect(queue.snapshot()[0].protocol).toBeUndefined();
+  full = true;
+  expect(queue.promoteRecord("memo")).toBe(false);
+  expect(new Outbox("alice").snapshot()[0].protocol).toBeUndefined();
+  full = false;
+  expect(queue.promoteRecord("memo")).toBe(true);
+  expect(new Outbox("alice").snapshot()[0]).toMatchObject({ id, protocol: 2 });
 });

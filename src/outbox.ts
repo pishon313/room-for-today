@@ -1,8 +1,28 @@
 import type { Item } from "./store";
 
-export type Op = { id: string; record: string; patch: Partial<Item>; at: number };
+// Untagged entries were written by older releases without server replay evidence.
+// They must be reviewed before being sent again.
+export type Op = { id: string; record: string; patch: Partial<Item>; at: number; protocol?: 2 };
 export type UnreadableOp = { key: string; raw: string; detail: string };
 const prefix = (uid: string) => "planner-pending:" + uid + ":";
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([key, part]) => [key, canonical(part)]),
+    );
+  return value;
+}
+
+// The marker is immutable. Its hash binds a stable operation ID to exactly one
+// record and patch, so a colliding or modified queued entry cannot be cleared.
+export async function operationPayloadHash(op: Pick<Op, "record" | "patch">): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify([op.record, canonical(op.patch)]));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 function inspectPending(uid: string): { ops: Op[]; unreadable: UnreadableOp[] } {
   const ops: Op[] = [];
   const unreadable: UnreadableOp[] = [];
@@ -30,6 +50,7 @@ function inspectPending(uid: string): { ops: Op[]; unreadable: UnreadableOp[] } 
         (op as Op).patch === null || Array.isArray((op as Op).patch) ||
         typeof (op as Op).at !== "number" ||
         !Number.isFinite((op as Op).at) ||
+        ((op as Op).protocol !== undefined && (op as Op).protocol !== 2) ||
         key !== prefix(uid) + (op as Op).id
       ) throw new Error("Pending edit has an invalid format.");
       ops.push(op as Op);
@@ -79,6 +100,7 @@ export class Outbox {
     const op: Op = {
       id: crypto.randomUUID(), record, patch,
       at: Math.max(Date.now(), latest + 1),
+      protocol: 2,
     };
     this.lastAt = op.at;
     this.memory.set(op.id, op);
@@ -113,6 +135,26 @@ export class Outbox {
 
   acknowledge(ids: string[]): string[] {
     return this.removeLocal(ids, true);
+  }
+
+  // An old entry might already have reached the cloud. Only an explicit user
+  // action can reinterpret it as a new edit. Persist the v2 tag before upload;
+  // if storage rejects the change, the old entry stays quarantined.
+  promoteRecord(record: string): boolean {
+    let successful = true;
+    for (const op of this.snapshot().filter((queued) => queued.record === record && queued.protocol !== 2)) {
+      const upgraded: Op = { ...op, protocol: 2 };
+      if (this.memory.has(op.id)) {
+        this.memory.set(op.id, upgraded);
+        continue;
+      }
+      try {
+        localStorage.setItem(prefix(this.uid) + op.id, JSON.stringify(upgraded));
+      } catch {
+        successful = false;
+      }
+    }
+    return successful;
   }
 
   discardRecord(record: string): number {
