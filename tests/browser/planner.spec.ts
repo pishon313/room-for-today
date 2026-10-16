@@ -56,7 +56,7 @@ test("Memo has its own responsive view and dashboard stays schedule-focused", as
   await page.setViewportSize({ width: 320, height: 700 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 320);
 });
-test("theme follows the system, toggles without changing layout, and remembers the choice", async ({
+test("the header switches appearance without moving content or losing the color group", async ({
   browser,
 }) => {
   const lightContext = await browser.newContext({ colorScheme: "light" });
@@ -74,6 +74,10 @@ test("theme follows the system, toggles without changing layout, and remembers t
 
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(root).toHaveAttribute("data-theme", "dark");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("planner-theme-v2")!))).toEqual({
+    group: "forest",
+    appearance: "dark",
+  });
   expect(
     await root.evaluate((element) => getComputedStyle(element).backgroundColor),
   ).not.toBe(lightBackground);
@@ -94,6 +98,11 @@ test("theme follows the system, toggles without changing layout, and remembers t
   await expect(root).toHaveAttribute("data-theme", "light");
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(root).toHaveAttribute("data-theme", "light");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Forest", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await lightContext.close();
 
   const darkContext = await browser.newContext({ colorScheme: "dark" });
@@ -105,7 +114,7 @@ test("theme follows the system, toggles without changing layout, and remembers t
   ).toBeVisible();
   await darkContext.close();
 });
-test("Settings applies each palette, remembers it, and can follow the system again", async ({
+test("Settings pairs color groups with Light, Dark, and the system appearance", async ({
   browser,
 }) => {
   const context = await browser.newContext({ colorScheme: "light" });
@@ -115,76 +124,128 @@ test("Settings applies each palette, remembers it, and can follow the system aga
   await expect(root).toHaveAttribute("data-theme", "light");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "System", exact: true }),
+    page.getByRole("button", { name: "Forest", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.locator(".appearance-options").getByRole("button", { name: "Follow system" }),
   ).toHaveAttribute("aria-pressed", "true");
 
   const background = () =>
     root.evaluate((element) => getComputedStyle(element).backgroundColor);
   const paletteBackgrounds = new Set([await background()]);
-  const palettes = [
-    ["Warm Light", "light"],
-    ["Forest Dark", "dark"],
-    ["Sierra Blue", "sierra-blue"],
-    ["DeepBlck", "deep-black"],
-    ["Gray", "gray"],
+  const groups = [
+    ["Forest", "forest", "light", "dark"],
+    ["Gray", "gray", "gray", "deep-black"],
+    ["Sierra Blue", "sierra-blue", "sierra-blue", "sierra-night"],
   ] as const;
-  for (const [name, value] of palettes) {
+  for (const [name, group, light, dark] of groups) {
     const option = page.getByRole("button", { name, exact: true });
     await option.click();
-    await expect(root).toHaveAttribute("data-theme", value);
+    await page.locator(".appearance-options").getByRole("button", { name: "Light" }).click();
+    await expect(root).toHaveAttribute("data-theme", light);
     await expect(option).toHaveAttribute("aria-pressed", "true");
-    expect(
-      await page.evaluate(() => localStorage.getItem("planner-theme")),
-    ).toBe(value);
-    if (value !== "light") {
-      const color = await background();
-      expect(paletteBackgrounds.has(color)).toBe(false);
-      paletteBackgrounds.add(color);
-    }
-    if (value === "sierra-blue" || value === "deep-black" || value === "gray") {
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("planner-theme-v2")!))).toEqual({
+      group,
+      appearance: "light",
+    });
+    const lightColor = await background();
+    if (group !== "forest") {
+      expect(paletteBackgrounds.has(lightColor)).toBe(false);
+      paletteBackgrounds.add(lightColor);
       await page.screenshot({
-        path: `tests/theme-${value}-desktop.png`,
+        path: `tests/theme-${light}-desktop.png`,
         fullPage: true,
       });
     }
+    await page.getByRole("button", { name: "Switch to dark mode" }).click();
+    await expect(root).toHaveAttribute("data-theme", dark);
+    await expect(option).toHaveAttribute("aria-pressed", "true");
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("planner-theme-v2")!))).toEqual({
+      group,
+      appearance: "dark",
+    });
+    expect(await background()).not.toBe(lightColor);
+    if (group !== "forest") {
+      await page.screenshot({
+        path: `tests/theme-${dark}-desktop.png`,
+        fullPage: true,
+      });
+    }
+    await page.getByRole("button", { name: "Switch to light mode" }).click();
+    await expect(root).toHaveAttribute("data-theme", light);
   }
 
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(root).toHaveAttribute("data-theme", "gray");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Gray", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
-  await page.getByRole("button", { name: "Sierra Blue", exact: true }).click();
-  await expect(root).toHaveAttribute("data-theme", "sierra-blue");
-  await page.screenshot({
-    path: "tests/theme-sierra-blue-iphone.png",
-    fullPage: true,
-  });
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(root).toHaveAttribute("data-theme", "sierra-blue");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Sierra Blue", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+  await page.screenshot({
+    path: "tests/theme-sierra-blue-iphone.png",
+    fullPage: true,
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(root).toHaveAttribute("data-theme", "sierra-blue");
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
   await page.setViewportSize({ width: 320, height: 700 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 320);
 
-  await page.getByRole("button", { name: "System", exact: true }).click();
-  await expect(root).toHaveAttribute("data-theme", "light");
-  expect(await page.evaluate(() => localStorage.getItem("planner-theme"))).toBe(
-    null,
-  );
+  await page.locator(".appearance-options").getByRole("button", { name: "Follow system" }).click();
+  await expect(root).toHaveAttribute("data-theme", "sierra-blue");
   await page.emulateMedia({ colorScheme: "dark" });
-  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(root).toHaveAttribute("data-theme", "sierra-night");
   await expect(
-    page.getByRole("button", { name: "System", exact: true }),
+    page.locator(".appearance-options").getByRole("button", { name: "Follow system" }),
   ).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".appearance-options").getByRole("button", { name: "Light" }).click();
+  await expect(root).toHaveAttribute("data-theme", "sierra-blue");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(root).toHaveAttribute("data-theme", "sierra-blue");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(root).toHaveAttribute("data-theme", "sierra-blue");
+  await page.locator(".appearance-options").getByRole("button", { name: "Dark" }).click();
+  await expect(root).toHaveAttribute("data-theme", "sierra-night");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(root).toHaveAttribute("data-theme", "sierra-night");
   await context.close();
+});
+
+test("legacy theme choices migrate to the matching color group and appearance", async ({
+  browser,
+}) => {
+  const legacyChoices = [
+    ["system", "forest", "system", "light"],
+    ["light", "forest", "light", "light"],
+    ["dark", "forest", "dark", "dark"],
+    ["gray", "gray", "light", "gray"],
+    ["deep-black", "gray", "dark", "deep-black"],
+    ["sierra-blue", "sierra-blue", "light", "sierra-blue"],
+  ] as const;
+  for (const [legacy, group, appearance, theme] of legacyChoices) {
+    const context = await browser.newContext({ colorScheme: "light" });
+    const page = await context.newPage();
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.evaluate((value) => {
+      localStorage.removeItem("planner-theme-v2");
+      localStorage.setItem("planner-theme", value);
+    }, legacy);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expect.poll(() =>
+      page.evaluate(() => JSON.parse(localStorage.getItem("planner-theme-v2")!)),
+    ).toEqual({ group, appearance });
+    expect(await page.evaluate(() => localStorage.getItem("planner-theme"))).toBeNull();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const groupName = group === "forest" ? "Forest" : group === "gray" ? "Gray" : "Sierra Blue";
+    const appearanceName = appearance === "system" ? "Follow system" : appearance === "light" ? "Light" : "Dark";
+    await expect(page.getByRole("button", { name: groupName, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".appearance-options").getByRole("button", { name: appearanceName })).toHaveAttribute("aria-pressed", "true");
+    await context.close();
+  }
 });
 test("cloud persistence, live sync, independent edits, routines, offline recovery and responsive layout", async ({
   browser,
@@ -417,13 +478,14 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
     "Rejected edit is preserved",
   );
   await p.screenshot({ path: "tests/desktop.png", fullPage: true });
-  for (const [name, value, file] of [
-    ["Sierra Blue", "sierra-blue", "tests/theme-sierra-blue-dashboard.png"],
-    ["DeepBlck", "deep-black", "tests/theme-deep-black-dashboard.png"],
-    ["Gray", "gray", "tests/theme-gray-dashboard.png"],
+  for (const [name, appearance, value, file] of [
+    ["Sierra Blue", "Light", "sierra-blue", "tests/theme-sierra-blue-dashboard.png"],
+    ["Gray", "Dark", "deep-black", "tests/theme-deep-black-dashboard.png"],
+    ["Gray", "Light", "gray", "tests/theme-gray-dashboard.png"],
   ]) {
     await p.getByRole("button", { name: "Settings", exact: true }).click();
     await p.getByRole("button", { name, exact: true }).click();
+    await p.locator(".appearance-options").getByRole("button", { name: appearance }).click();
     await expect(p.locator("html")).toHaveAttribute("data-theme", value);
     await p.getByRole("button", { name: "Dashboard", exact: true }).click();
     await expect(p.locator(".memos")).not.toBeVisible();
@@ -433,6 +495,9 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
       "A small reminder",
     );
   }
+  await p.getByRole("button", { name: "Settings", exact: true }).click();
+  await p.getByRole("button", { name: "Forest", exact: true }).click();
+  await expect(p.locator("html")).toHaveAttribute("data-theme", "light");
   await p.getByRole("button", { name: "Dashboard", exact: true }).click();
   await p.getByRole("button", { name: "Switch to dark mode" }).click();
   await p.screenshot({ path: "tests/dark-desktop.png", fullPage: true });

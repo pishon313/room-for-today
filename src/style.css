@@ -651,6 +651,53 @@ h3 {
   color: #7a807b;
   line-height: 1.6;
 }
+.settings-choice-head {
+  margin-bottom: 12px;
+}
+.theme-grid + .settings-choice-head {
+  margin-top: 28px;
+}
+.settings-choice-head h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.settings-choice-head p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.72;
+}
+.appearance-options {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid #deded7;
+  border-radius: 10px;
+  background: #eef1ec;
+}
+.appearance-options button {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  color: #5e6d60;
+  font-size: 13px;
+  font-weight: 600;
+}
+.appearance-options button[aria-pressed="true"] {
+  background: #fffefc;
+  border-color: #cbd7c9;
+  color: #355c3e;
+  box-shadow: 0 1px 3px #22332916;
+}
+.appearance-options button:hover:not(:disabled) {
+  background: #f8faf6;
+}
+.appearance-options button[aria-pressed="true"]:hover:not(:disabled) {
+  background: #fffefc;
+}
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
@@ -729,19 +776,31 @@ h3 {
 .theme-preview-dark i:last-child {
   background: #2d2b24;
 }
+.theme-preview-forest {
+  border-color: #aebca8;
+  background: linear-gradient(90deg, #f7f6f2 0 50%, #171e1a 50%);
+}
+.theme-preview-forest i:first-child {
+  background: linear-gradient(90deg, #faf9f6 0 50%, #1d2720 50%);
+}
+.theme-preview-forest i:last-child {
+  background: #222b25;
+  box-shadow: 0 0 0 1px #3e4b40;
+}
 .theme-preview-sierra-blue {
-  border-color: #cbd9e5;
-  background: #eaf1f7;
+  border-color: #8eacc2;
+  background: linear-gradient(90deg, #eaf1f7 0 50%, #101a25 50%);
 }
 .theme-preview-sierra-blue i {
   background: #fff;
   box-shadow: 0 0 0 1px #cbd9e5;
 }
 .theme-preview-sierra-blue i:first-child {
-  background: #f4f8fb;
+  background: linear-gradient(90deg, #f4f8fb 0 50%, #142231 50%);
 }
 .theme-preview-sierra-blue i:last-child {
-  background: #f3f8fb;
+  background: #192a3b;
+  box-shadow: 0 0 0 1px #354e63;
 }
 .theme-preview-deep-black {
   border-color: #343c43;
@@ -758,18 +817,19 @@ h3 {
   background: #191f24;
 }
 .theme-preview-gray {
-  border-color: #d3d5d7;
-  background: #eeeeef;
+  border-color: #9ca4aa;
+  background: linear-gradient(90deg, #eeeeef 0 50%, #0b0d0f 50%);
 }
 .theme-preview-gray i {
   background: #fff;
   box-shadow: 0 0 0 1px #d3d5d7;
 }
 .theme-preview-gray i:first-child {
-  background: #f8f8f8;
+  background: linear-gradient(90deg, #f8f8f8 0 50%, #111519 50%);
 }
 .theme-preview-gray i:last-child {
-  background: #f5f5f5;
+  background: #15191d;
+  box-shadow: 0 0 0 1px #343c43;
 }
 .theme-option-copy {
   display: grid;
@@ -1236,6 +1296,15 @@ fieldset:disabled .panel {
     min-height: 380px;
     padding: 20px 18px;
   }
+  .appearance-options {
+    display: flex;
+    width: 100%;
+  }
+  .appearance-options button {
+    flex: 1 1 70px;
+    min-width: 0;
+    padding: 8px 5px;
+  }
   .theme-grid {
     grid-template-columns: 1fr;
   }
@@ -1640,6 +1709,25 @@ html[data-theme="dark"] .settings-note,
 html[data-theme="dark"] .theme-option-copy small {
   color: #b0bdad;
 }
+html[data-theme="dark"] .appearance-options {
+  background: #27372c;
+  border-color: #4a614c;
+}
+html[data-theme="dark"] .appearance-options button {
+  color: #b0bdad;
+}
+html[data-theme="dark"] .appearance-options button[aria-pressed="true"] {
+  background: #354a38;
+  border-color: #6c8b6f;
+  color: #d1e6cd;
+  box-shadow: none;
+}
+html[data-theme="dark"] .appearance-options button:hover:not(:disabled) {
+  background: #304136;
+}
+html[data-theme="dark"] .appearance-options button[aria-pressed="true"]:hover:not(:disabled) {
+  background: #354a38;
+}
 html[data-theme="dark"] .theme-option {
   background: #222b25;
   border-color: #3e4b40;
@@ -1692,6 +1780,34 @@ html[data-theme="sierra-blue"] {
   --theme-toast-muted: #d9e7f2;
   --theme-focus: #426f96;
   --theme-error: #a34b3a;
+}
+html[data-theme="sierra-night"] {
+  --theme-page: #101a25;
+  --theme-header: #142231;
+  --theme-panel: #192a3b;
+  --theme-ink: #edf4f9;
+  --theme-muted: #b9cbd9;
+  --theme-subtle: #a9bfcd;
+  --theme-border: #354e63;
+  --theme-divider: #30475b;
+  --theme-accent: #9cc9eb;
+  --theme-accent-hover: #b5dafa;
+  --theme-accent-ink: #122334;
+  --theme-accent-text: #a9d4f2;
+  --theme-soft: #21394d;
+  --theme-soft-border: #476986;
+  --theme-note: #1c2c3a;
+  --theme-note-border: #3b5365;
+  --theme-line: #3c5264;
+  --theme-disabled: #879eb0;
+  --theme-check-border: #8cacc4;
+  --theme-progress-track: #30475b;
+  --theme-progress-fill: #8dbbdc;
+  --theme-toast: #cde6f5;
+  --theme-toast-ink: #10263a;
+  --theme-toast-muted: #38546a;
+  --theme-focus: #b5ddf7;
+  --theme-error: #ffb8a8;
 }
 html[data-theme="deep-black"] {
   --theme-page: #0b0d0f;
@@ -1752,7 +1868,8 @@ html[data-theme="gray"] {
 html:is(
   [data-theme="sierra-blue"],
   [data-theme="deep-black"],
-  [data-theme="gray"]
+  [data-theme="gray"],
+  [data-theme="sierra-night"]
 ) {
   color-scheme: light;
   color: var(--theme-ink);
@@ -1761,10 +1878,14 @@ html:is(
 html[data-theme="deep-black"] {
   color-scheme: dark;
 }
+html[data-theme="sierra-night"] {
+  color-scheme: dark;
+}
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   body {
   background: var(--theme-page);
@@ -1772,19 +1893,22 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   button:focus-visible,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   input:focus-visible,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   textarea:focus-visible {
   outline-color: var(--theme-focus);
@@ -1792,7 +1916,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   button:hover:not(:disabled) {
   background: var(--theme-soft);
@@ -1800,13 +1925,15 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   input:focus,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   textarea:focus {
   background: var(--theme-soft);
@@ -1814,13 +1941,15 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   input::placeholder,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   textarea::placeholder {
   color: var(--theme-subtle);
@@ -1828,7 +1957,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   header {
   background: var(--theme-header);
@@ -1837,7 +1967,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .view-tabs
   button {
@@ -1846,7 +1977,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .view-tabs
   button[aria-current="page"] {
@@ -1856,7 +1988,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .view-tabs
   button:hover:not(:disabled) {
@@ -1866,38 +1999,44 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .brand
   svg,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .save-state,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .summary-link,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-today,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .today-link,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .add-row {
   color: var(--theme-accent-text);
@@ -1905,19 +2044,22 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .signin,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .new-note,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-toggle {
   background: var(--theme-panel);
@@ -1927,69 +2069,80 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .eyebrow,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .timezone,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .intro
   p,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .arrows,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .weekday,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .caption,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .empty,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-week-label,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .week-strip
   span,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .progress,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .daily
   .task
@@ -1997,7 +2150,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .daily
   .task
@@ -2005,31 +2159,36 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .memo-footer,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   footer,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .settings-intro,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .settings-note,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-option-copy
   small {
@@ -2038,7 +2197,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .primary {
   background: var(--theme-accent);
@@ -2047,7 +2207,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .primary:hover:not(:disabled) {
   background: var(--theme-accent-hover);
@@ -2055,7 +2216,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .notice {
   background: var(--theme-soft);
@@ -2065,7 +2227,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .notice
   span {
@@ -2074,7 +2237,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .notice
   button {
@@ -2083,7 +2247,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .save-notice {
   background: var(--theme-toast);
@@ -2093,7 +2258,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .save-notice
   span {
@@ -2102,7 +2268,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .save-notice
   button {
@@ -2112,7 +2279,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .save-notice
   button:hover:not(:disabled) {
@@ -2122,13 +2290,15 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .error,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .save-state.error {
   color: var(--theme-error);
@@ -2136,13 +2306,15 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .panel,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-option {
   background: var(--theme-panel);
@@ -2151,7 +2323,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-option:hover:not(:disabled) {
   background: var(--theme-soft);
@@ -2160,7 +2333,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-option[data-selected="true"] {
   background: var(--theme-soft);
@@ -2170,7 +2344,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-option-check {
   border-color: var(--theme-check-border);
@@ -2178,7 +2353,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .theme-option[data-selected="true"]
   .theme-option-check {
@@ -2189,21 +2365,24 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .calendar
   button.selected,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .done
   .check,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .habit-check.checked {
   background: var(--theme-accent);
@@ -2213,7 +2392,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .calendar
   button.today:not(.selected) {
@@ -2222,14 +2402,16 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .calendar
   button.muted:not(.selected),
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .habit-check:disabled {
   color: var(--theme-disabled);
@@ -2237,7 +2419,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .habit-check.checked:disabled {
   border-color: var(--theme-accent);
@@ -2246,14 +2429,16 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .calendar
   i,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .week-strip
   i.has-tasks {
@@ -2262,37 +2447,43 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .subhead,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .table-head,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-row,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary-list,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .day-nav,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .daily
   .task {
@@ -2301,7 +2492,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .scroll {
   scrollbar-color: var(--theme-border) transparent;
@@ -2309,13 +2501,15 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .check,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .habit-check {
   border-color: var(--theme-check-border);
@@ -2323,7 +2517,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .done
   .task-text
@@ -2331,19 +2526,22 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .delete,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .table-head,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-settings {
   color: var(--theme-subtle);
@@ -2351,7 +2549,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-edit-toggle {
   color: var(--theme-accent-text);
@@ -2359,13 +2558,15 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-edit-toggle[aria-expanded="true"],
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-settings
   button[aria-pressed="true"] {
@@ -2375,7 +2576,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-today-summary {
   background: var(--theme-soft);
@@ -2384,21 +2586,24 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-today-summary
   span,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-today-summary
   strong,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary-count
   strong {
@@ -2407,21 +2612,24 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-today-summary
   small,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary-count
   span,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary-list {
   color: var(--theme-muted);
@@ -2429,14 +2637,16 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary
   progress::-webkit-progress-bar,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .progress
   progress::-webkit-progress-bar {
@@ -2445,28 +2655,32 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary
   progress::-webkit-progress-value,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .progress
   progress::-webkit-progress-value,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .routine-summary
   progress::-moz-progress-bar,
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .progress
   progress::-moz-progress-bar {
@@ -2475,7 +2689,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .week-strip
   button {
@@ -2484,7 +2699,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .week-strip
   i {
@@ -2493,7 +2709,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .week-strip
   button.active {
@@ -2503,7 +2720,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .week-strip
   button.active
@@ -2511,7 +2729,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .day-empty {
   color: var(--theme-accent-text);
@@ -2519,7 +2738,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .note {
   background: var(--theme-note);
@@ -2528,7 +2748,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .blank-note
   p {
@@ -2537,7 +2758,8 @@ html:is(
 html:is(
     [data-theme="sierra-blue"],
     [data-theme="deep-black"],
-    [data-theme="gray"]
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
   )
   .lines {
   background: repeating-linear-gradient(
@@ -2547,22 +2769,78 @@ html:is(
     transparent 39px
   );
 }
+html:is(
+    [data-theme="sierra-blue"],
+    [data-theme="deep-black"],
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
+  )
+  .appearance-options {
+  background: var(--theme-soft);
+  border-color: var(--theme-soft-border);
+}
+html:is(
+    [data-theme="sierra-blue"],
+    [data-theme="deep-black"],
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
+  )
+  .appearance-options button {
+  color: var(--theme-muted);
+}
+html:is(
+    [data-theme="sierra-blue"],
+    [data-theme="deep-black"],
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
+  )
+  .appearance-options button[aria-pressed="true"] {
+  background: var(--theme-panel);
+  border-color: var(--theme-accent);
+  color: var(--theme-accent-text);
+  box-shadow: none;
+}
+html:is(
+    [data-theme="sierra-blue"],
+    [data-theme="deep-black"],
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
+  )
+  .appearance-options button:hover:not(:disabled) {
+  background: var(--theme-soft-border);
+}
+html:is(
+    [data-theme="sierra-blue"],
+    [data-theme="deep-black"],
+    [data-theme="gray"],
+    [data-theme="sierra-night"]
+  )
+  .appearance-options button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--theme-panel);
+}
 html[data-theme="deep-black"] input:-webkit-autofill,
 html[data-theme="deep-black"] textarea:-webkit-autofill {
   -webkit-text-fill-color: #eff2f4;
   box-shadow: 0 0 0 1000px #23313a inset;
 }
+html[data-theme="sierra-night"] input:-webkit-autofill,
+html[data-theme="sierra-night"] textarea:-webkit-autofill {
+  -webkit-text-fill-color: #edf4f9;
+  box-shadow: 0 0 0 1000px #21394d inset;
+}
 @media (max-width: 700px) {
   html:is(
       [data-theme="sierra-blue"],
       [data-theme="deep-black"],
-      [data-theme="gray"]
+      [data-theme="gray"],
+      [data-theme="sierra-night"]
     )
     .view-tabs,
   html:is(
       [data-theme="sierra-blue"],
       [data-theme="deep-black"],
-      [data-theme="gray"]
+      [data-theme="gray"],
+      [data-theme="sierra-night"]
     )
     .planner.routine-mode
     .routine-settings {

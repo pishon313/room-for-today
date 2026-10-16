@@ -33,54 +33,85 @@ import {
 import { usePlanner, type Item, type Kind } from "./store";
 import { effectiveRoutineDays, routineWeekProgress } from "./routineSchedule";
 
-type Theme = "light" | "dark";
-type ThemeChoice = Theme | "system" | "sierra-blue" | "deep-black" | "gray";
+type Theme =
+  | "light"
+  | "dark"
+  | "gray"
+  | "deep-black"
+  | "sierra-blue"
+  | "sierra-night";
+type ThemeGroup = "forest" | "gray" | "sierra-blue";
+type Appearance = "system" | "light" | "dark";
+type ThemePreference = { group: ThemeGroup; appearance: Appearance };
 type View = "dashboard" | "routine" | "memo" | "settings";
 
-const themeOptions: { id: ThemeChoice; label: string; description: string }[] =
-  [
-    { id: "system", label: "System", description: "Follow this device" },
-    {
-      id: "light",
-      label: "Warm Light",
-      description: "The original calm palette",
-    },
-    {
-      id: "dark",
-      label: "Forest Dark",
-      description: "Soft greens after hours",
-    },
-    {
-      id: "sierra-blue",
-      label: "Sierra Blue",
-      description: "A clear, quiet blue",
-    },
-    {
-      id: "deep-black",
-      label: "DeepBlck",
-      description: "Minimal and nearly black",
-    },
-    { id: "gray", label: "Gray", description: "Simple and neutral" },
-  ];
+const themeGroups: {
+  id: ThemeGroup;
+  label: string;
+  description: string;
+}[] = [
+  { id: "forest", label: "Forest", description: "Warm Light · Forest Dark" },
+  { id: "gray", label: "Gray", description: "Gray · Deep Black" },
+  {
+    id: "sierra-blue",
+    label: "Sierra Blue",
+    description: "Sierra Blue · Sierra Night",
+  },
+];
 
-const themeColors: Record<Exclude<ThemeChoice, "system">, string> = {
+const themeByGroup: Record<ThemeGroup, Record<"light" | "dark", Theme>> = {
+  forest: { light: "light", dark: "dark" },
+  gray: { light: "gray", dark: "deep-black" },
+  "sierra-blue": { light: "sierra-blue", dark: "sierra-night" },
+};
+
+const themeColors: Record<Theme, string> = {
   light: "#f7f6f2",
   dark: "#1d2720",
   "sierra-blue": "#f4f8fb",
+  "sierra-night": "#142231",
   "deep-black": "#111519",
   gray: "#f8f8f8",
 };
 
-function readThemeChoice(): ThemeChoice {
-  let saved: string | null = null;
+function readThemePreference(): ThemePreference {
   try {
-    saved = localStorage.getItem("planner-theme");
+    const saved = localStorage.getItem("planner-theme-v2");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as Partial<ThemePreference> | null;
+        if (
+          parsed &&
+          (parsed.group === "forest" ||
+            parsed.group === "gray" ||
+            parsed.group === "sierra-blue") &&
+          (parsed.appearance === "system" ||
+            parsed.appearance === "light" ||
+            parsed.appearance === "dark")
+        ) {
+          return { group: parsed.group, appearance: parsed.appearance };
+        }
+      } catch {
+        // Fall back to the previously saved theme.
+      }
+    }
+    const legacy = localStorage.getItem("planner-theme");
+    switch (legacy) {
+      case "light":
+        return { group: "forest", appearance: "light" };
+      case "dark":
+        return { group: "forest", appearance: "dark" };
+      case "gray":
+        return { group: "gray", appearance: "light" };
+      case "deep-black":
+        return { group: "gray", appearance: "dark" };
+      case "sierra-blue":
+        return { group: "sierra-blue", appearance: "light" };
+    }
   } catch {
     // The system preference still works when browser storage is unavailable.
   }
-  return themeOptions.some((option) => option.id === saved)
-    ? (saved as ThemeChoice)
-    : "system";
+  return { group: "forest", appearance: "system" };
 }
 
 function viewFromHash(): View {
@@ -134,16 +165,36 @@ export default function App() {
     [selected, setSelected] = useState(today()),
     [month, setMonth] = useState(today()),
     [current, setCurrent] = useState(today()),
-    [themeChoice, setThemeChoice] = useState<ThemeChoice>(readThemeChoice),
+    [themePreference, setThemePreference] =
+      useState<ThemePreference>(readThemePreference),
     [systemDark, setSystemDark] = useState(
       window.matchMedia("(prefers-color-scheme: dark)").matches,
     ),
     [editingRoutineId, setEditingRoutineId] = useState<string | null>(null),
     [view, setView] = useState<View>(viewFromHash);
-  const theme =
-    themeChoice === "system" ? (systemDark ? "dark" : "light") : themeChoice;
+  const isDark =
+    themePreference.appearance === "system"
+      ? systemDark
+      : themePreference.appearance === "dark";
+  const theme = themeByGroup[themePreference.group][isDark ? "dark" : "light"];
   const store = usePlanner(user?.uid);
   const { items, patch, add } = store;
+  useEffect(() => {
+    try {
+      if (
+        localStorage.getItem("planner-theme") !== null &&
+        localStorage.getItem("planner-theme-v2") === null
+      ) {
+        localStorage.setItem(
+          "planner-theme-v2",
+          JSON.stringify(themePreference),
+        );
+        localStorage.removeItem("planner-theme");
+      }
+    } catch {
+      // The current theme still works when browser storage is unavailable.
+    }
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document
@@ -154,7 +205,8 @@ export default function App() {
     const system = window.matchMedia("(prefers-color-scheme: dark)");
     const onSystemChange = () => setSystemDark(system.matches);
     const onStorage = (event: StorageEvent) => {
-      if (event.key === "planner-theme") setThemeChoice(readThemeChoice());
+      if (event.key === "planner-theme-v2" || event.key === "planner-theme")
+        setThemePreference(readThemePreference());
     };
     system.addEventListener("change", onSystemChange);
     window.addEventListener("storage", onStorage);
@@ -257,19 +309,18 @@ export default function App() {
       setAuthError("Couldn’t sign out. Please try again.");
     }
   };
-  const chooseTheme = (choice: ThemeChoice) => {
+  const chooseTheme = (choice: ThemePreference) => {
     try {
-      if (choice === "system") localStorage.removeItem("planner-theme");
-      else localStorage.setItem("planner-theme", choice);
+      localStorage.setItem("planner-theme-v2", JSON.stringify(choice));
+      localStorage.removeItem("planner-theme");
     } catch {
       // Switching still works for this page when storage is unavailable.
     }
-    setThemeChoice(choice);
+    setThemePreference(choice);
   };
-  const quickTheme =
-    theme === "dark" || theme === "deep-black" ? "light" : "dark";
+  const quickTheme = isDark ? "light" : "dark";
   const toggleTheme = () => {
-    chooseTheme(quickTheme);
+    chooseTheme({ ...themePreference, appearance: quickTheme });
   };
   const task = (item: Item) => (
     <div className={"task " + (item.done ? "done" : "")} key={item.id}>
@@ -773,20 +824,26 @@ export default function App() {
                 <h2>Appearance</h2>
               </div>
               <p className="settings-intro">
-                Pick a theme for this browser. Your plans and memos stay the
-                same.
+                Choose a color family, then let your device set the brightness
+                or keep it fixed. Your plans and memos stay the same.
               </p>
+              <div className="settings-choice-head">
+                <h3>Color family</h3>
+                <p>Each family has a light and a dark palette.</p>
+              </div>
               <div className="theme-grid">
-                {themeOptions.map((option) => (
+                {themeGroups.map((option) => (
                   <button
                     key={option.id}
                     type="button"
                     className="theme-option"
                     aria-label={option.label}
                     aria-describedby={`theme-description-${option.id}`}
-                    aria-pressed={themeChoice === option.id}
-                    data-selected={themeChoice === option.id}
-                    onClick={() => chooseTheme(option.id)}
+                    aria-pressed={themePreference.group === option.id}
+                    data-selected={themePreference.group === option.id}
+                    onClick={() =>
+                      chooseTheme({ ...themePreference, group: option.id })
+                    }
                   >
                     <span
                       className={`theme-preview theme-preview-${option.id}`}
@@ -803,14 +860,42 @@ export default function App() {
                       </small>
                     </span>
                     <span className="theme-option-check" aria-hidden="true">
-                      {themeChoice === option.id && <Check size={16} />}
+                      {themePreference.group === option.id && (
+                        <Check size={16} />
+                      )}
                     </span>
                   </button>
                 ))}
               </div>
+              <div className="settings-choice-head">
+                <h3>Light or dark</h3>
+                <p>Follow this device, or keep the selected look fixed.</p>
+              </div>
+              <div
+                className="appearance-options"
+                role="group"
+                aria-label="Light and dark mode"
+              >
+                {([
+                  ["system", "Follow system"],
+                  ["light", "Light"],
+                  ["dark", "Dark"],
+                ] as const).map(([appearance, name]) => (
+                  <button
+                    key={appearance}
+                    type="button"
+                    aria-pressed={themePreference.appearance === appearance}
+                    onClick={() =>
+                      chooseTheme({ ...themePreference, appearance })
+                    }
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
               <p className="settings-note">
-                Your choice is remembered on this browser. System follows this
-                device’s appearance setting.
+                The header button switches light and dark within this color
+                family. Choose Follow system to use this device’s setting again.
               </p>
             </section>
           </div>
