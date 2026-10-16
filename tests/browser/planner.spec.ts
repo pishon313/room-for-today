@@ -1,19 +1,49 @@
 import { test, expect, type Page } from "@playwright/test";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
 import { shift, today } from "../../src/dates";
-async function expectFloatingTopCenter(page: Page) {
-  const notice = await page.locator(".save-notice").evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    return {
-      position: getComputedStyle(el).position,
-      top: rect.top,
-      centerOffset: Math.abs(rect.left + rect.width / 2 - innerWidth / 2),
-    };
+async function expectNoBlockingSaveOverlay(page: Page) {
+  await expect(page.locator(".save-notice")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Unsaved changes" })).toHaveCount(0);
+  await expect(page.locator(".save-state-trigger")).toBeVisible();
+}
+
+async function cloudRecordId(uid: string, kind: string, title: string) {
+  const environment = await initializeTestEnvironment({
+    projectId: "demo-planner",
+    firestore: { host: "127.0.0.1", port: 8080 },
   });
-  expect(notice.position).toBe("fixed");
-  expect(notice.top).toBeLessThanOrEqual(24);
-  expect(notice.centerOffset).toBeLessThanOrEqual(1);
+  try {
+    const db = environment.authenticatedContext(uid).firestore();
+    const snap = await getDocs(collection(db, "users", uid, "items"));
+    const record = snap.docs.find((item) => {
+      const data = item.data();
+      return data.kind === kind && data.title === title && !data.deleted;
+    });
+    expect(record, `Saved ${kind} ${title} should exist`).toBeDefined();
+    return record!.id;
+  } finally {
+    await environment.cleanup();
+  }
+}
+
+async function injectRejectedMemoEdit(page: Page, record: string, body: string) {
+  await page.evaluate(async ({ record, body }) => {
+    const { auth } = await import("/src/firebase.ts" as string);
+    const id = crypto.randomUUID();
+    localStorage.setItem(
+      `planner-pending:${auth!.currentUser!.uid}:${id}`,
+      JSON.stringify({
+        id,
+        record,
+        patch: { body, time: "99:99" },
+        at: Date.now() + 1,
+      }),
+    );
+    window.dispatchEvent(new Event("planner-queue"));
+  }, { record, body });
+  await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+  await expectNoBlockingSaveOverlay(page);
 }
 async function login(page: Page, uid: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -520,8 +550,7 @@ test("cloud persistence, live sync, independent edits, routines, bucket list, of
     .getByPlaceholder("Let your thoughts land here…")
     .fill("Keep this unsaved thought");
   await expect(p.locator("header [role=status]")).toContainText("Offline");
-  await expect(p.locator(".save-notice")).toBeVisible();
-  await expectFloatingTopCenter(p);
+  await expectNoBlockingSaveOverlay(p);
   expect(
     await p
       .locator(".planner")
@@ -552,7 +581,7 @@ test("cloud persistence, live sync, independent edits, routines, bucket list, of
     window.dispatchEvent(new Event("planner-queue"));
   }, noteRecord);
   await expect(p.locator("header [role=status]")).toHaveText("Couldn’t save");
-  await expect(p.locator(".save-notice[role=alert]")).toBeVisible();
+  await expectNoBlockingSaveOverlay(p);
   expect(
     await p
       .locator(".planner")
@@ -567,23 +596,18 @@ test("cloud persistence, live sync, independent edits, routines, bucket list, of
   await expect(p.getByPlaceholder("Let your thoughts land here…")).toHaveValue(
     "Rejected edit is preserved",
   );
-  await p.evaluate(async () => {
-    const { auth } = await import("/src/firebase.ts" as string);
-    for (const key of Object.keys(localStorage).filter((k) =>
-      k.startsWith("planner-pending:" + auth.currentUser.uid + ":"),
-    )) {
-      const op = JSON.parse(localStorage.getItem(key)!);
-      if (op.patch.time === "99:99") {
-        op.patch.time = "";
-        localStorage.setItem(key, JSON.stringify(op));
-      }
-    }
-  });
-  await p.getByRole("button", { name: "Retry", exact: true }).click();
+  await p.locator(".save-state-trigger").click();
+  const pendingMemo = p.getByRole("dialog", { name: "Unsaved changes" }).locator(".save-recovery-item");
+  await expect(pendingMemo).toContainText("A small reminder");
+  await expect(pendingMemo.locator("textarea[readonly]")).toHaveValue(/Rejected edit is preserved/);
+  await pendingMemo.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(p.locator("header [role=status]")).toHaveText("Couldn’t save");
+  await pendingMemo.getByRole("button", { name: "Discard pending changes" }).click();
   await expect(p.locator("header [role=status]")).toHaveText("Saved");
   await expect(q.getByPlaceholder("Let your thoughts land here…")).toHaveValue(
-    "Rejected edit is preserved",
+    "Keep this unsaved thought",
   );
+  await p.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await p.screenshot({ path: "tests/desktop.png", fullPage: true });
   for (const [name, appearance, value, file] of [
     ["Sierra Blue", "Light", "sierra-blue", "tests/theme-sierra-blue-dashboard.png"],
@@ -629,8 +653,7 @@ test("cloud persistence, live sync, independent edits, routines, bucket list, of
     .evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
   await a.setOffline(true);
   await p.getByPlaceholder("Note title").fill("A reminder on iPhone");
-  await expect(p.locator(".save-notice")).toBeVisible();
-  await expectFloatingTopCenter(p);
+  await expectNoBlockingSaveOverlay(p);
   expect(
     await p
       .locator(".planner")
@@ -709,4 +732,195 @@ test("new routines have no check-ins before their start date", async ({ page }) 
   await expect(page.locator(".routine-row .habit-check:disabled")).toHaveCount(7);
   await page.getByRole("button", { name: "Dashboard", exact: true }).click();
   await expect(page.locator(".routine-summary-count")).toContainText("0 of 0");
+});
+
+test("a rejected memo stays recoverable while valid records sync and selective discard works", async ({ browser }) => {
+  test.setTimeout(120000);
+  const first = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "rejected-memo-" + crypto.randomUUID();
+  const writeRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/google.firestore.v1.Firestore/Write/channel")) {
+      writeRequests.push(request.url());
+    }
+  });
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("A small reminder");
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Saved memo body");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Saved memo body");
+    const actualUid = await page.evaluate(async () => {
+      const { auth } = await import("/src/firebase.ts" as string);
+      return auth!.currentUser!.uid;
+    });
+    const memoId = await cloudRecordId(actualUid, "memo", "A small reminder");
+    const plannerTop = await page.locator(".planner").evaluate((el) => el.getBoundingClientRect().top + scrollY);
+
+    await page.getByRole("heading", { name: "Memo", exact: true }).click();
+    await injectRejectedMemoEdit(page, memoId, "Rejected edit is still here");
+    await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Rejected edit is still here");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Saved memo body");
+    expect(await page.locator(".planner").evaluate((el) => el.getBoundingClientRect().top + scrollY)).toBe(plannerTop);
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+    await page.getByRole("dialog", { name: "Unsaved changes" }).getByRole("button", { name: "Close", exact: true }).click();
+
+    for (const [width, height] of [[1440, 1000], [390, 844], [320, 700]]) {
+      await page.setViewportSize({ width, height });
+      await expect(page.locator("body")).toHaveJSProperty("scrollWidth", width);
+      await expectNoBlockingSaveOverlay(page);
+      await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+      await expect(page.locator(".monthly")).toBeVisible();
+      await page.getByRole("button", { name: "Memo", exact: true }).click();
+      await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Rejected edit is still here");
+      await page.getByPlaceholder("Note title").click();
+      if (width === 320) {
+        await page.locator(".save-state-trigger").click();
+        const narrowRecovery = page.getByRole("dialog", { name: "Unsaved changes" });
+        await expect(narrowRecovery.locator(".save-recovery-item")).toBeVisible();
+        await expect(narrowRecovery.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+        await narrowRecovery.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 320);
+      }
+    }
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+    await other.getByRole("button", { name: "Dashboard", exact: true }).click();
+    await page.getByRole("button", { name: "Add task", exact: true }).click();
+    await page.getByPlaceholder("What would you like to do?").fill("Unrelated daily task");
+    await expect(other.getByPlaceholder("What would you like to do?")).toHaveValue("Unrelated daily task");
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Rejected edit is still here");
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    await page.locator(".save-state-trigger").click();
+    let recovery = page.getByRole("dialog", { name: "Unsaved changes" });
+    let memoRecovery = recovery.locator(".save-recovery-item").filter({ hasText: "A small reminder" });
+    await expect(memoRecovery).toContainText("Rejected by server · Needs attention");
+    await expect(memoRecovery.locator("textarea[readonly]")).toHaveValue(/Rejected edit is still here/);
+    await memoRecovery.getByRole("button", { name: "Copy", exact: true }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Rejected edit is still here");
+    await memoRecovery.locator("details summary").click();
+    await expect(memoRecovery.locator("details")).toHaveAttribute("open", "");
+    const beforeRetryRequests = writeRequests.length;
+    await memoRecovery.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect.poll(() => writeRequests.length).toBeGreaterThan(beforeRetryRequests);
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    if (!(await recovery.isVisible())) {
+      await page.locator(".save-state-trigger").click();
+      recovery = page.getByRole("dialog", { name: "Unsaved changes" });
+      memoRecovery = recovery.locator(".save-recovery-item").filter({ hasText: "A small reminder" });
+    }
+    let cancelledPrompt = "";
+    page.once("dialog", async (dialog) => {
+      cancelledPrompt = dialog.message();
+      await dialog.dismiss();
+    });
+    await memoRecovery.getByRole("button", { name: "Discard pending changes" }).click();
+    expect(cancelledPrompt).toContain("A small reminder");
+    await expect(memoRecovery.locator("textarea[readonly]")).toHaveValue(/Rejected edit is still here/);
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    await recovery.getByRole("button", { name: "Close", exact: true }).click();
+
+    await first.setOffline(true);
+    await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+    await page.getByPlaceholder("Add a little detail…").fill("Queued unrelated detail");
+    await expect(page.locator("header [role=status]")).not.toHaveText("Saved");
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.locator(".save-state-trigger").click();
+    recovery = page.getByRole("dialog", { name: "Unsaved changes" });
+    memoRecovery = recovery.locator(".save-recovery-item").filter({ hasText: "A small reminder" });
+    await expect(recovery.locator(".save-recovery-item")).toHaveCount(2);
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("A small reminder");
+      await dialog.accept();
+    });
+    await memoRecovery.getByRole("button", { name: "Discard pending changes" }).click();
+    await expect(memoRecovery).toHaveCount(0);
+    await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Saved memo body");
+    await expect(page.locator("header [role=status]")).not.toHaveText("Saved");
+    await expect(other.getByPlaceholder("What would you like to do?")).toHaveValue("Unrelated daily task");
+    await first.setOffline(false);
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    await expect(other.getByPlaceholder("Add a little detail…")).toHaveValue("Queued unrelated detail");
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Saved memo body");
+    if (await page.getByRole("dialog").isVisible()) {
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    }
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test("memory-only edits survive storage quota errors, Retry, and another edit", async ({ browser }) => {
+  test.setTimeout(90000);
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const page = await first.newPage();
+  const other = await second.newPage();
+  const uid = "quota-recovery-" + crypto.randomUUID();
+  try {
+    await login(page, uid);
+    await login(other, uid);
+    await page.getByRole("button", { name: "Memo", exact: true }).click();
+    await other.getByRole("button", { name: "Memo", exact: true }).click();
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByPlaceholder("Note title").fill("Quota memo");
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Saved baseline");
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Saved baseline");
+
+    await first.setOffline(true);
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      (window as Window & { restorePlannerStorage?: () => void }).restorePlannerStorage = () => {
+        Storage.prototype.setItem = original;
+      };
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith("planner-pending:")) {
+          throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+        }
+        return original.call(this, key, value);
+      };
+    });
+    await page.getByPlaceholder("Let your thoughts land here…").fill("Memory-only thought");
+    await expect(page.locator("header [role=status]")).toHaveText("Couldn’t save");
+    await expectNoBlockingSaveOverlay(page);
+    await page.locator(".save-state-trigger").click();
+    const recovery = page.getByRole("dialog", { name: "Unsaved changes" });
+    await expect(recovery.getByRole("alert")).toContainText("Couldn’t save to device storage");
+    await expect(recovery.locator(".save-recovery-item")).toContainText("Waiting for server confirmation");
+    await recovery.getByRole("button", { name: "Retry", exact: true }).first().click();
+    if (await recovery.isVisible()) {
+      await recovery.getByRole("button", { name: "Close", exact: true }).click();
+    }
+    await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Memory-only thought");
+    await page.getByPlaceholder("Note title").fill("Quota memo edited later");
+    await expect(page.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Memory-only thought");
+    await page.evaluate(() => {
+      (window as Window & { restorePlannerStorage?: () => void }).restorePlannerStorage?.();
+    });
+    await first.setOffline(false);
+    await expect(page.locator("header [role=status]")).toHaveText("Saved");
+    await expect(other.getByPlaceholder("Note title")).toHaveValue("Quota memo edited later");
+    await expect(other.getByPlaceholder("Let your thoughts land here…")).toHaveValue("Memory-only thought");
+  } finally {
+    await first.close();
+    await second.close();
+  }
 });

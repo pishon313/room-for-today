@@ -25,6 +25,9 @@ beforeAll(async () => {
       port: 8080,
     },
   });
+  // Fixed record IDs below must start clean even when this suite is rerun
+  // against an already-running local emulator.
+  await env.clearFirestore();
 });
 afterAll(async () => {
   await env.cleanup();

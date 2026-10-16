@@ -4,16 +4,21 @@ import { batches, project } from "../src/store";
 
 let storage: Record<string, string>;
 let full: boolean;
+let removalFails: boolean;
 beforeEach(() => {
   storage = {};
   full = false;
+  removalFails = false;
   Object.defineProperties(storage, {
     getItem: { value: (key: string) => storage[key] ?? null },
     setItem: { value: (key: string, value: string) => {
       if (full) throw new Error("quota exceeded");
       storage[key] = value;
     } },
-    removeItem: { value: (key: string) => { delete storage[key]; } },
+    removeItem: { value: (key: string) => {
+      if (removalFails) throw new Error("device storage removal failed");
+      delete storage[key];
+    } },
   });
   vi.stubGlobal("localStorage", storage);
 });
@@ -64,4 +69,82 @@ it("keeps edits made during an upload and separates accounts", () => {
   queue.acknowledge(uploading.map((op) => op.id));
   expect(batches(queue.snapshot())[0].patch.title).toBe("newer");
   expect(new Outbox("bob").snapshot()).toEqual([]);
+});
+
+it("discards only the selected record, including memory-only edits", () => {
+  const queue = new Outbox("alice");
+  queue.enqueue("memo", { body: "durable unsaved body" });
+  queue.enqueue("task", { title: "keep this task" });
+  full = true;
+  expect(queue.enqueue("memo", { body: "memory-only latest body" })).toBe(false);
+  full = false;
+  expect(queue.discardRecord("memo")).toBe(2);
+  expect(queue.snapshot()).toMatchObject([
+    { record: "task", patch: { title: "keep this task" } },
+  ]);
+});
+
+it("acknowledges memory-only writes even when device removal fails, while retaining durable ones", () => {
+  const queue = new Outbox("alice");
+  queue.enqueue("stored", { title: "durable" });
+  const durableId = queue.snapshot()[0].id;
+  full = true;
+  expect(queue.enqueue("memory", { title: "memory-only" })).toBe(false);
+  const memoryId = queue.snapshot().find((op) => op.record === "memory")!.id;
+  removalFails = true;
+  expect(queue.acknowledge([memoryId])).toEqual([]);
+  expect(queue.snapshot().map((op) => op.record)).toEqual(["stored"]);
+  expect(queue.acknowledge([durableId])).toEqual([durableId]);
+  expect(queue.snapshot().map((op) => op.record)).toEqual(["stored"]);
+  removalFails = false;
+  expect(queue.acknowledge([durableId])).toEqual([]);
+  expect(queue.snapshot()).toEqual([]);
+});
+
+it("does not mark an unsaved edit confirmed when explicit discard cannot remove it", () => {
+  const queue = new Outbox("alice");
+  queue.enqueue("memo", { body: "keep this unsaved text" });
+  const id = queue.snapshot()[0].id;
+  removalFails = true;
+  expect(() => queue.discardRecord("memo")).toThrow();
+  expect(queue.confirmedIds()).not.toContain(id);
+  expect(queue.snapshot()).toMatchObject([
+    { id, record: "memo", patch: { body: "keep this unsaved text" } },
+  ]);
+  removalFails = false;
+  expect(queue.discardRecord("memo")).toBe(1);
+  expect(queue.snapshot()).toEqual([]);
+});
+
+it("retains memory-only edits when a durable edit for the same item cannot be discarded", () => {
+  const queue = new Outbox("alice");
+  queue.enqueue("memo", { body: "durable draft" });
+  const durableId = queue.snapshot()[0].id;
+  full = true;
+  expect(queue.enqueue("memo", { body: "newer memory-only draft" })).toBe(false);
+  const memoryId = queue.snapshot().find((op) => op.id !== durableId)!.id;
+  full = false;
+  removalFails = true;
+  expect(() => queue.discardRecord("memo")).toThrow();
+  expect(queue.snapshot().map((op) => op.id)).toEqual([durableId, memoryId]);
+  expect(queue.confirmedIds()).toEqual([]);
+  removalFails = false;
+  expect(queue.discardRecord("memo")).toBe(2);
+  expect(queue.snapshot()).toEqual([]);
+});
+
+it("isolates a corrupt durable entry and discards only that entry", () => {
+  const badKey = "planner-pending:alice:corrupt";
+  storage[badKey] = "{not-json";
+  const queue = new Outbox("alice");
+  expect(queue.enqueue("good", { title: "keep this valid edit" })).toBe(true);
+  expect(queue.snapshot()).toMatchObject([
+    { record: "good", patch: { title: "keep this valid edit" } },
+  ]);
+  expect(queue.readIssues()).toEqual([
+    { key: badKey, raw: "{not-json", detail: expect.any(String) },
+  ]);
+  expect(queue.discardUnreadable(badKey)).toBe(true);
+  expect(queue.snapshot()).toHaveLength(1);
+  expect(queue.readIssues()).toEqual([]);
 });

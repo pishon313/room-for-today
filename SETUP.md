@@ -14,9 +14,11 @@ After signing in, create a note, wait for **Saved**, and open a second device to
 
 - Firestore `/users/{uid}/items/{id}` is the source of truth. Monthly goals, weekly priorities, daily tasks, routines, Bucket List wishes, date-specific checkmarks, and memos are individual records. No sample records are seeded.
 - Monthly keys are `YYYY-MM`, daily keys are `YYYY-MM-DD`, and weekly keys are the Monday date. The planner uses Asia/Seoul for today's date and date-only UTC arithmetic for navigation.
-- A durable device outbox stores only pending patches, namespaced by account. Text saves are debounced 700ms; patches for one record are combined. An operation is removed only after Firestore acknowledges its write. **Saved** also requires a server-backed snapshot and no pending edits.
-- Offline writes remain visible and retry on reconnect, every 15 seconds, or with **Retry**. A write without confirmation after 12 seconds shows a failure notice. Refreshing with an internet connection recovers the outbox. Closing while pending prompts a warning; sign-out is blocked while pending.
+- A durable device outbox stores only pending patches, namespaced by account. Text saves are debounced 700ms; patches for one record are combined in edit order. An operation is removed only after Firestore acknowledges its write. **Saved** also requires a server-backed snapshot and no unresolved edits.
+- Saving runs per record: a rejected edit stays pending while unrelated records continue syncing. Persistent Firestore rejections wait for a change to that item or an explicit **Retry**; temporary errors retry on reconnect and every 15 seconds. If confirmation takes more than 12 seconds, open the header save status to see the pending warning. Refreshing with an internet connection recovers durable edits. Closing while pending prompts a warning; sign-out opens recovery and remains blocked until edits save or are deliberately discarded.
+- The header save status opens a recovery dialog without moving or covering the planner by itself. It identifies each pending item, shows its unsaved fields for viewing or copying, and offers item-specific **Retry** and **Discard pending changes** controls. Technical error details are collapsed separately. Discard requires confirmation and removes only that item's pending patches; its saved cloud record and other items stay intact. Copy any wanted unsaved text before discarding. The dialog can also be opened while saving is healthy to inspect the status.
 - Browser storage is a recovery buffer, not the saved planner database. Do not clear site data while changes are pending. This version needs internet to load the app. Device storage exhaustion shows an explicit copy-your-text warning. Edits that cannot be written to device storage remain in memory across queue refreshes and Retry, and are still sent to Firestore. Keep the page open until they save. Pending edits use increasing timestamps to preserve their order even within the same millisecond or after a clock adjustment.
+- If browser storage cannot remove a queue entry after the server confirms it, the app reports a device-cleanup problem separately and does not re-upload that entry while the page stays open. Retry cleanup after storage access returns; keep the page open until the pending copy clears. An unreadable device entry is shown as raw text for copying and can be discarded individually with confirmation. It cannot be silently treated as an empty queue or as **Saved**. If all browser storage access is blocked, restore access before signing out. A confirmed entry whose local removal remains blocked may be replayed after closing and reopening the browser; avoid closing until cleanup succeeds.
 - Concurrent edits merge at field level. Different items or fields do not replace each other. For the same field (including memo body or repeat-day selection), the last write received by Firestore wins. Reconnecting old edits can therefore become the latest edit. Text currently focused stays stable until blur. Deleted records are tombstones, so stale text edits cannot resurrect them.
 - The dashboard shows today's remaining routine count and the selected week's progress. Open the Routine tab to review past weeks, mark check-ins, and edit repeat days.
 - The Bucket List tab keeps wishes apart from dated plans. Add a title and optional short note, mark a wish done to record the current Asia/Seoul date, move it back to Want to do, or delete it. It does not change the dashboard. Bucket items sync individually through Firestore; completion state and date are written together.
@@ -34,14 +36,20 @@ Node 22+ recommended. `.env.local` is already configured for this project and ig
 npm ci
 npm run dev
 npm run build
-npx firebase deploy --only hosting,firestore:rules --project coco-planner-20261003
+```
+
+When ready for a separate production release, deploy rules first and Hosting second:
+
+```sh
+npx firebase deploy --only firestore:rules --project coco-planner-20261003
+npx firebase deploy --only hosting --project coco-planner-20261003
 ```
 
 Never enable `VITE_USE_EMULATORS` in a production environment. Emulator connections are additionally guarded by Vite's development flag. No service account key is included.
 
 ## Verification
 
-The suite includes fourteen calendar/outbox/routine-schedule unit tests, six Firestore rules integration tests, and browser integration tests against local Firebase Auth/Firestore emulators. Browser checks cover refresh, sign-out/in, two sessions, different-field edits, Bucket List completion and Seoul dates, date navigation, routine schedule history, today's remaining count, offline recovery, server-rejected writes, pending text recovery after reload, retry, another account's empty planner, all Settings theme choices and persistence, system light/dark preference, quick theme toggle, and desktop/iPhone-width layout down to 320px. TypeScript, production build, unit tests, Firestore rules tests, and browser integration tests passed for this change.
+The suite includes calendar/outbox/routine-schedule unit tests, six Firestore rules integration tests, and browser integration tests against local Firebase Auth/Firestore emulators. Browser checks cover refresh, sign-out/in, two sessions, different-field edits, Bucket List completion and Seoul dates, date navigation, routine schedule history, today's remaining count, offline recovery, server-rejected writes, pending text recovery after reload, retry and confirmed or cancelled discard through the UI, another account's empty planner, all Settings theme choices and persistence, system light/dark preference, quick theme toggle, and desktop/iPhone-width layout down to 320px. The save-error checks include an invalid memo edit alongside a valid daily task in another session, selective discard, storage-quota recovery, unreadable-queue isolation, device-cleanup failure, and clickable navigation while an error remains pending.
 
 The rules tests specifically attempt cross-account reads/writes/list queries and anonymous access and confirm rejection. They also reject invalid data and deleted-record resurrection.
 

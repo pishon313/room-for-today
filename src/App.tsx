@@ -18,6 +18,7 @@ import {
   CalendarDays,
   Moon,
   Sun,
+  X,
 } from "lucide-react";
 import { auth, configured } from "./firebase";
 import {
@@ -174,6 +175,8 @@ export default function App() {
       window.matchMedia("(prefers-color-scheme: dark)").matches,
     ),
     [editingRoutineId, setEditingRoutineId] = useState<string | null>(null),
+    [recoveryOpen, setRecoveryOpen] = useState(false),
+    [copiedRecord, setCopiedRecord] = useState<string | null>(null),
     [view, setView] = useState<View>(viewFromHash);
   const isDark =
     themePreference.appearance === "system"
@@ -237,6 +240,17 @@ export default function App() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+  useEffect(() => {
+    if (!recoveryOpen) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRecoveryOpen(false);
+    };
+    window.addEventListener("keydown", onEscape);
+    document
+      .querySelector<HTMLButtonElement>(".save-recovery-close")
+      ?.focus();
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [recoveryOpen]);
   const enabled = !!user && store.ready;
   const days = weekDays(selected);
   const filtered = (kind: Kind, period?: string) =>
@@ -303,7 +317,7 @@ export default function App() {
   };
   const logout = async () => {
     if (store.pendingCount) {
-      setAuthError("Wait for your pending edits to save before signing out.");
+      setRecoveryOpen(true);
       return;
     }
     try {
@@ -324,6 +338,23 @@ export default function App() {
   const quickTheme = isDark ? "light" : "dark";
   const toggleTheme = () => {
     chooseTheme({ ...themePreference, appearance: quickTheme });
+  };
+  const copyPending = async (record: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedRecord(record);
+    } catch {
+      setCopiedRecord(null);
+      [...document.querySelectorAll<HTMLTextAreaElement>(
+        ".save-recovery-item textarea",
+      )]
+        .find(
+          (area) =>
+            area.closest(".save-recovery-item")?.getAttribute("data-record-id") ===
+            record,
+        )
+        ?.select();
+    }
   };
   const task = (item: Item) => (
     <div className={"task " + (item.done ? "done" : "")} key={item.id}>
@@ -512,13 +543,24 @@ export default function App() {
           >
             {quickTheme === "light" ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <span
-            className={"save-state " + (store.error ? "error" : "")}
-            role="status"
+          <button
+            type="button"
+            className="save-state-trigger"
+            aria-label={
+              store.pendingCount
+                ? "Review unsaved changes"
+                : "View save status"
+            }
+            onClick={() => setRecoveryOpen(true)}
           >
-            <Cloud size={16} />
-            {store.status}
-          </span>
+            <span
+              className={"save-state " + (store.error ? "error" : "")}
+              role="status"
+            >
+              <Cloud size={16} />
+              {store.status}
+            </span>
+          </button>
           {user ? (
             <>
               <span className="user-name">
@@ -619,20 +661,206 @@ export default function App() {
         ) : !store.ready ? (
           <div className="notice">Loading your saved planner…</div>
         ) : null}
-        {(store.error || authError || store.pendingCount > 0) && (
+        {authError && (
+          <div className="notice auth-notice" role="alert">
+            <span>{authError}</span>
+            <button onClick={() => setAuthError("")}>Dismiss</button>
+          </div>
+        )}
+        {recoveryOpen && (
           <div
-            className="notice save-notice"
-            role={store.error || authError ? "alert" : "status"}
+            className="save-recovery-backdrop"
+            onClick={(event) => {
+              if (event.target === event.currentTarget)
+                setRecoveryOpen(false);
+            }}
           >
-            <div>
-              {authError ||
-                store.error ||
-                `${store.pendingCount} pending changes · Keep this device until saving finishes.`}
-            </div>
-            {store.error && <button onClick={store.retry}>Retry</button>}
-            {authError && (
-              <button onClick={() => setAuthError("")}>Dismiss</button>
-            )}
+            <section
+              className="save-recovery"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="save-recovery-title"
+            >
+              <div className="save-recovery-head">
+                <div>
+                  <h2 id="save-recovery-title">
+                    {store.pendingCount ? "Unsaved changes" : "Save status"}
+                  </h2>
+                  <p>
+                    {store.pendingCount
+                      ? "Your local edits are listed below. Keep this device until they save, or copy them before discarding. Other items sync independently when connected."
+                      : store.loadError
+                        ? "Cloud plans could not be loaded. Try again when your connection is ready."
+                        : !user
+                          ? "Sign in to sync your private planner."
+                        : store.status === "Saved"
+                          ? "Everything is saved."
+                          : "Waiting for the server to confirm your plans."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="save-recovery-close"
+                  aria-label="Close"
+                  onClick={() => setRecoveryOpen(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              {store.error && <p role="alert">{store.error}</p>}
+              {store.storageError && store.storageError !== store.error && (
+                <p role="alert">{store.storageError}</p>
+              )}
+              {store.cleanupError && store.cleanupError !== store.error && (
+                <p role="alert">{store.cleanupError}</p>
+              )}
+              {store.actionError && store.actionError !== store.error && (
+                <p role="alert">{store.actionError}</p>
+              )}
+              {store.slowWarning && <p>{store.slowWarning}</p>}
+              {store.loadDetail && (
+                <details className="save-recovery-details">
+                  <summary>Technical details</summary>
+                  <pre>{store.loadDetail}</pre>
+                </details>
+              )}
+              {store.loadError && (
+                <div className="save-recovery-actions">
+                  <button type="button" onClick={() => store.retry()}>
+                    Retry
+                  </button>
+                </div>
+              )}
+              <div className="save-recovery-list">
+                {store.pendingRecords.map((pending) => {
+                  const title = pending.item.title || "Untitled item";
+                  const content = JSON.stringify(pending.item, null, 2);
+                  return (
+                    <article
+                      className="save-recovery-item"
+                      data-record-id={pending.record}
+                      key={pending.record}
+                    >
+                      <h3>{title}</h3>
+                      <p>
+                        {pending.issue?.kind === "rejected"
+                          ? "Rejected by server · Needs attention"
+                          : pending.issue?.kind === "temporary"
+                            ? "Temporary save problem · Will retry automatically"
+                            : pending.issue?.kind === "cleanup"
+                              ? "Cloud saved · Device copy needs cleanup"
+                            : pending.saving
+                              ? "Saving…"
+                              : "Waiting for server confirmation"}
+                      </p>
+                      <div className="save-recovery-content">
+                        <textarea
+                          readOnly
+                          aria-label={`Unsaved content for ${title}`}
+                          value={content}
+                        />
+                      </div>
+                      <div className="save-recovery-actions">
+                        <button
+                          type="button"
+                          onClick={() => void copyPending(pending.record, content)}
+                        >
+                          {copiedRecord === pending.record ? "Copied" : "Copy"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => store.retry(pending.record)}
+                          disabled={pending.saving}
+                        >
+                          Retry
+                        </button>
+                        <button
+                          type="button"
+                          disabled={pending.saving}
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Discard unsaved changes for ${title}? Only this item's pending changes will be removed. Its saved cloud record and other edits will remain.`,
+                              )
+                            )
+                              void store.discard(pending.record);
+                          }}
+                        >
+                          Discard pending changes
+                        </button>
+                      </div>
+                      {pending.issue && (
+                        <details className="save-recovery-details">
+                          <summary>Technical details</summary>
+                          <pre>
+                            {pending.issue.code}: {pending.issue.detail}
+                          </pre>
+                        </details>
+                      )}
+                    </article>
+                  );
+                })}
+                {store.unreadable.map((entry) => {
+                  const title = entry.key
+                    ? "Unreadable pending edit"
+                    : "Device storage unavailable";
+                  return (
+                    <article
+                      className="save-recovery-item"
+                      data-record-id={entry.key}
+                      key={entry.key || "unavailable-storage"}
+                    >
+                      <h3>{title}</h3>
+                      <p>
+                        {entry.key
+                          ? "This device entry could not be parsed. Copy its raw text before discarding it. Other edits remain safe."
+                          : "The pending queue cannot be read. Restore browser storage access and retry before leaving."}
+                      </p>
+                      {entry.raw && (
+                        <div className="save-recovery-content">
+                          <textarea
+                            readOnly
+                            aria-label="Raw unreadable pending content"
+                            value={entry.raw}
+                          />
+                        </div>
+                      )}
+                      <div className="save-recovery-actions">
+                        {entry.raw && (
+                          <button
+                            type="button"
+                            onClick={() => void copyPending(entry.key, entry.raw)}
+                          >
+                            {copiedRecord === entry.key ? "Copied" : "Copy"}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => store.retry()}>
+                          Retry
+                        </button>
+                        {entry.key && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  "Discard this unreadable pending entry? Copy its raw text first if you may need it. Other pending edits and cloud records will remain.",
+                                )
+                              ) void store.discardUnreadable(entry.key);
+                            }}
+                          >
+                            Discard pending changes
+                          </button>
+                        )}
+                      </div>
+                      <details className="save-recovery-details">
+                        <summary>Technical details</summary>
+                        <pre>{entry.detail}</pre>
+                      </details>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
           </div>
         )}
         <fieldset
