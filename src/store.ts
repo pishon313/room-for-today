@@ -15,6 +15,7 @@ export type Kind =
   | "daily"
   | "routine"
   | "memo"
+  | "bucket"
   | "completion"
   | "schedule";
 export type Item = {
@@ -28,6 +29,8 @@ export type Item = {
   days: number[];
   deleted: boolean;
   startDate?: string;
+  createdAt?: number;
+  completedAt?: string;
 };
 export function batches(ops: Op[]) {
   const groups = new Map<
@@ -194,6 +197,7 @@ export function usePlanner(uid: string | undefined) {
       days: [0, 1, 2, 3, 4],
       deleted: false,
       ...(kind === "routine" ? { startDate: today() } : {}),
+      ...(kind === "bucket" ? { createdAt: Date.now(), completedAt: "" } : {}),
       ...extra,
     });
     return id;

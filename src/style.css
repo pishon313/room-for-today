@@ -1217,15 +1217,17 @@ fieldset:disabled .panel {
   .view-tabs {
     order: 3;
     width: 100%;
-    justify-content: center;
+    justify-content: flex-start;
     margin: 0;
     border-top: 1px solid #e7e9e1;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
   }
   .view-tabs button {
     height: 44px;
-    min-width: 0;
-    flex: 1;
-    padding: 0 8px;
+    flex: 0 0 auto;
+    padding: 0 10px;
     font-size: 13px;
     white-space: nowrap;
   }
@@ -2842,8 +2844,198 @@ html[data-theme="sierra-night"] textarea:-webkit-autofill {
       [data-theme="gray"],
       [data-theme="sierra-night"]
     )
-    .planner.routine-mode
+  .planner.routine-mode
     .routine-settings {
     border-color: var(--theme-divider);
+  }
+}
+
+/* Bucket List is a quiet, dedicated space separate from the dated planner. */
+.planner:not(.bucket-mode) .bucket-workspace {
+  display: none;
+}
+.planner.bucket-mode {
+  display: block;
+}
+.planner.bucket-mode .column.left,
+.planner.bucket-mode .column.center,
+.planner.bucket-mode .memos {
+  display: none;
+}
+.bucket-workspace {
+  --bucket-surface: #f8f9f5;
+  --bucket-border: #e3e8df;
+  --bucket-muted: #7b897b;
+  --bucket-accent: #4d7456;
+  --bucket-accent-bg: #e5eee2;
+  width: min(100%, 1100px);
+  min-height: 510px;
+  margin: 0 auto;
+  padding: 28px;
+}
+.bucket-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 24px;
+  align-items: start;
+}
+.bucket-group {
+  min-width: 0;
+}
+.bucket-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--bucket-border);
+}
+.bucket-group-head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.bucket-group-head span,
+.bucket-group-head small {
+  color: var(--bucket-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bucket-card {
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 16px;
+  border: 1px solid var(--bucket-border);
+  border-radius: 9px;
+  background: var(--bucket-surface);
+}
+.bucket-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.bucket-complete {
+  display: inline-flex;
+  flex: 0 0 38px;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin: -3px 0 0 -5px;
+  border: 1px solid var(--bucket-accent);
+  border-radius: 50%;
+  color: var(--bucket-accent);
+}
+.bucket-complete[aria-pressed="true"] {
+  background: var(--bucket-accent-bg);
+}
+.bucket-complete:disabled {
+  opacity: 0.45;
+}
+.bucket-card-content {
+  flex: 1;
+  min-width: 0;
+}
+.bucket-card-content input[type="text"],
+.bucket-card-content textarea {
+  display: block;
+  width: 100%;
+}
+.bucket-card-content input[type="text"] {
+  min-height: 34px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.bucket-card-content input.bucket-note {
+  min-height: 32px;
+  margin-top: 3px;
+  color: var(--bucket-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.bucket-card-content textarea {
+  min-height: 64px;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.bucket-card-content input[type="date"] {
+  min-height: 36px;
+  color: var(--bucket-muted);
+  font-size: 12px;
+}
+.bucket-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+.bucket-card-actions button {
+  min-height: 36px;
+  padding: 6px 9px;
+  color: var(--bucket-accent);
+  font-size: 12px;
+}
+.bucket-card-actions button:hover:not(:disabled) {
+  background: var(--bucket-accent-bg);
+}
+.bucket-done-date {
+  display: block;
+  margin-top: 6px;
+  color: var(--bucket-muted);
+  font-size: 12px;
+}
+.bucket-empty {
+  min-height: 130px;
+  padding: 35px 18px;
+  border: 1px dashed var(--bucket-border);
+  border-radius: 9px;
+  color: var(--bucket-muted);
+  background: var(--bucket-surface);
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+html[data-theme="dark"] .bucket-workspace {
+  --bucket-surface: #29352c;
+  --bucket-border: #405344;
+  --bucket-muted: #afbeab;
+  --bucket-accent: #c3e0bf;
+  --bucket-accent-bg: #354a38;
+}
+html:is(
+    [data-theme="sierra-blue"],
+    [data-theme="sierra-night"],
+    [data-theme="gray"],
+    [data-theme="deep-black"]
+  )
+  .bucket-workspace {
+  --bucket-surface: var(--theme-note);
+  --bucket-border: var(--theme-note-border);
+  --bucket-muted: var(--theme-muted);
+  --bucket-accent: var(--theme-accent-text);
+  --bucket-accent-bg: var(--theme-soft);
+}
+
+@media (max-width: 700px) {
+  .bucket-workspace {
+    min-height: 420px;
+    padding: 20px 18px;
+  }
+  .bucket-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+  .bucket-complete {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+    margin-top: -5px;
+  }
+  .bucket-card-actions button {
+    min-height: 44px;
   }
 }

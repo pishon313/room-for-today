@@ -43,7 +43,7 @@ type Theme =
 type ThemeGroup = "forest" | "gray" | "sierra-blue";
 type Appearance = "system" | "light" | "dark";
 type ThemePreference = { group: ThemeGroup; appearance: Appearance };
-type View = "dashboard" | "routine" | "memo" | "settings";
+type View = "dashboard" | "routine" | "bucket" | "memo" | "settings";
 
 const themeGroups: {
   id: ThemeGroup;
@@ -116,7 +116,10 @@ function readThemePreference(): ThemePreference {
 
 function viewFromHash(): View {
   const hash = window.location.hash.slice(1);
-  return hash === "routine" || hash === "memo" || hash === "settings"
+  return hash === "routine" ||
+    hash === "bucket" ||
+    hash === "memo" ||
+    hash === "settings"
     ? hash
     : "dashboard";
 }
@@ -156,7 +159,7 @@ function Text({
     },
     maxLength: multiline ? 20000 : 300,
   };
-  return multiline ? <textarea {...props} /> : <input {...props} />;
+  return multiline ? <textarea {...props} /> : <input type="text" {...props} />;
 }
 export default function App() {
   const [user, setUser] = useState<User | null>(null),
@@ -368,6 +371,83 @@ export default function App() {
       </button>
     </div>
   );
+  const bucketItems = filtered("bucket");
+  const bucketWishes = bucketItems
+    .filter((item) => !item.done)
+    .sort(
+      (a, b) =>
+        (b.createdAt || 0) - (a.createdAt || 0) ||
+        a.id.localeCompare(b.id),
+    );
+  const bucketDone = bucketItems
+    .filter((item) => item.done)
+    .sort(
+      (a, b) =>
+        (b.completedAt || "").localeCompare(a.completedAt || "") ||
+        (b.createdAt || 0) - (a.createdAt || 0) ||
+        a.id.localeCompare(b.id),
+    );
+  const addBucket = () => {
+    const id = create("bucket", "");
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLInputElement>(`[data-bucket-id="${id}"] input`)
+        ?.focus();
+    });
+  };
+  const bucketCard = (item: Item) => (
+    <article className="bucket-card" data-bucket-id={item.id} key={item.id}>
+      <div className="bucket-card-top">
+        <button
+          className="bucket-complete"
+          type="button"
+          aria-label={
+            item.done
+              ? `Move ${item.title || "wish"} back to want to do`
+              : `Mark ${item.title || "wish"} as done`
+          }
+          aria-pressed={item.done}
+          disabled={!item.done && !item.title.trim()}
+          onClick={() =>
+            patch(item.id, {
+              done: !item.done,
+              completedAt: item.done ? "" : today(),
+            })
+          }
+        >
+          {item.done && <Check size={17} />}
+        </button>
+        <div className="bucket-card-content">
+          <Text
+            value={item.title}
+            onChange={(title) => patch(item.id, { title })}
+            placeholder="What would you love to do?"
+          />
+          <Text
+            value={item.body}
+            onChange={(body) => patch(item.id, { body })}
+            placeholder="Add a note (optional)"
+            className="bucket-note"
+          />
+        </div>
+      </div>
+      <div className="bucket-card-actions">
+        {item.done && item.completedAt && (
+          <time dateTime={item.completedAt} className="bucket-done-date">
+            Completed {label(item.completedAt, { month: "short", day: "numeric", year: "numeric" })}
+          </time>
+        )}
+        <button
+          className="icon"
+          type="button"
+          aria-label={`Delete ${item.title || "wish"}`}
+          onClick={() => remove(item)}
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </article>
+  );
   const daily = filtered("daily", selected),
     done = daily.filter((x) => x.done).length;
   const routines = filtered("routine");
@@ -403,6 +483,12 @@ export default function App() {
             onClick={() => showView("routine")}
           >
             Routine
+          </button>
+          <button
+            aria-current={view === "bucket" ? "page" : undefined}
+            onClick={() => showView("bucket")}
+          >
+            Bucket List
           </button>
           <button
             aria-current={view === "memo" ? "page" : undefined}
@@ -460,6 +546,8 @@ export default function App() {
             <h1>
               {view === "routine"
                 ? "Find your rhythm."
+                : view === "bucket"
+                  ? "Make room for someday."
                 : view === "memo"
                   ? "Make room for your thoughts."
                 : view === "settings"
@@ -469,6 +557,8 @@ export default function App() {
             <p>
               {view === "settings" ? (
                 "Choose the colors that feel right for you."
+              ) : view === "bucket" ? (
+                "A place for the experiences you want to remember."
               ) : view === "memo" ? (
                 "Ideas, reminders, and thoughts in one quiet place."
               ) : (
@@ -1065,6 +1155,44 @@ export default function App() {
             <p className="memo-footer">
               A quieter mind starts with a little space.
             </p>
+          </section>
+          <section className="panel bucket-workspace">
+            <div className="section-head">
+              <div>
+                <h2>Bucket List</h2>
+                <p className="caption">A home for the things you hope to do.</p>
+              </div>
+              <button
+                className="new-note"
+                type="button"
+                onClick={addBucket}
+              >
+                <Plus size={16} />
+                Add a wish
+              </button>
+            </div>
+            <div className="bucket-columns">
+              <div className="bucket-group">
+                <div className="bucket-group-head">
+                  <h3>Want to do</h3>
+                  <span>{bucketWishes.length}</span>
+                </div>
+                {bucketWishes.map(bucketCard)}
+                {!bucketWishes.length && (
+                  <div className="bucket-empty">What would you love to do someday?</div>
+                )}
+              </div>
+              <div className="bucket-group">
+                <div className="bucket-group-head">
+                  <h3>Done</h3>
+                  <span>{bucketDone.length}</span>
+                </div>
+                {bucketDone.map(bucketCard)}
+                {!bucketDone.length && (
+                  <div className="bucket-empty">Your memories will gather here.</div>
+                )}
+              </div>
+            </div>
           </section>
         </fieldset>
         <footer>

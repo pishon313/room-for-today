@@ -1,4 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
+import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { shift, today } from "../../src/dates";
 async function expectFloatingTopCenter(page: Page) {
   const notice = await page.locator(".save-notice").evaluate((el) => {
     const rect = el.getBoundingClientRect();
@@ -55,6 +58,47 @@ test("Memo has its own responsive view and dashboard stays schedule-focused", as
   await page.screenshot({ path: "tests/memo-iphone.png", fullPage: true });
   await page.setViewportSize({ width: 320, height: 700 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 320);
+});
+test("Bucket List has its own responsive view and keeps the dashboard focused", async ({
+  page,
+}) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".monthly")).toBeVisible();
+  await page.getByRole("button", { name: "Bucket List", exact: true }).click();
+  await expect(page).toHaveURL(/#bucket$/);
+  await expect(
+    page.getByRole("heading", { name: "Bucket List", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".monthly")).toBeHidden();
+  await expect(page.locator(".weekly")).toBeHidden();
+  await expect(page.locator(".daily")).toBeHidden();
+  await expect(page.locator(".memos")).toBeHidden();
+  await page.screenshot({ path: "tests/bucket-desktop.png", fullPage: true });
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/#bucket$/);
+  await expect(
+    page.getByRole("heading", { name: "Bucket List", exact: true }),
+  ).toBeVisible();
+  for (const [width, height] of [
+    [390, 844],
+    [320, 700],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", width);
+    if (width === 390) {
+      await page.screenshot({ path: "tests/bucket-iphone.png", fullPage: true });
+    }
+  }
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.locator(".settings-workspace")).toBeVisible();
+  await page.getByRole("button", { name: "Bucket List", exact: true }).click();
+  await expect(page.locator(".bucket-workspace")).toBeVisible();
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await expect(page.locator(".monthly")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Bucket List", exact: true }),
+  ).toBeHidden();
 });
 test("the header switches appearance without moving content or losing the color group", async ({
   browser,
@@ -247,9 +291,10 @@ test("legacy theme choices migrate to the matching color group and appearance", 
     await context.close();
   }
 });
-test("cloud persistence, live sync, independent edits, routines, offline recovery and responsive layout", async ({
+test("cloud persistence, live sync, independent edits, routines, bucket list, offline recovery and responsive layout", async ({
   browser,
 }) => {
+  test.setTimeout(90000);
   const a = await browser.newContext(),
     b = await browser.newContext();
   const p = await a.newPage(),
@@ -299,18 +344,24 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await expect(p.locator(".routine-workspace")).toBeVisible();
   await expect(p.locator(".monthly")).not.toBeVisible();
   // Seed an established routine so this flow still exercises historical check-ins.
-  await p.evaluate(async () => {
-    const { auth, db } = await import("/src/firebase.ts" as string);
-    const { today, shift } = await import("/src/dates.ts" as string);
-    const { doc, setDoc, serverTimestamp } = await import(
-      "/node_modules/.vite/deps/firebase_firestore.js" as string
-    );
-    await setDoc(doc(db, "users", auth.currentUser.uid, "items", crypto.randomUUID()), {
+  const actualUid = await p.evaluate(async () => {
+    const { auth } = await import("/src/firebase.ts" as string);
+    return auth!.currentUser!.uid;
+  });
+  const testEnvironment = await initializeTestEnvironment({
+    projectId: "demo-planner",
+    firestore: { host: "127.0.0.1", port: 8080 },
+  });
+  try {
+    const ownerDb = testEnvironment.authenticatedContext(actualUid).firestore();
+    await setDoc(doc(ownerDb, "users", actualUid, "items", crypto.randomUUID()), {
       kind: "routine", period: "", title: "Stretch", body: "", time: "",
       done: false, days: [0, 1, 2, 3, 4], deleted: false,
       startDate: shift(today(), -14), updatedAt: serverTimestamp(),
     });
-  });
+  } finally {
+    await testEnvironment.cleanup();
+  }
   await expect(p.getByPlaceholder("Name your habit")).toHaveValue("Stretch");
   await p.getByRole("heading", { name: "Routine", exact: true }).click();
   await p
@@ -380,6 +431,62 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await p.getByRole("button", { name: "Dashboard", exact: true }).click();
   await expect(p.locator(".routine-today-summary")).toContainText("0 left");
   await expect(q.locator(".routine-today-summary")).toContainText("0 left");
+
+  await p.getByRole("button", { name: "Bucket List", exact: true }).click();
+  await q.getByRole("button", { name: "Bucket List", exact: true }).click();
+  await p.getByRole("button", { name: "Add a wish", exact: true }).click();
+  await expect(p.getByPlaceholder("What would you love to do?")).toBeFocused();
+  await expect(p.getByRole("button", { name: "Mark wish as done" })).toBeDisabled();
+  await p.getByPlaceholder("What would you love to do?").fill("See the northern lights");
+  await p.getByPlaceholder("Add a note (optional)").fill("Travel to Tromsø");
+  await expect(p.locator("header [role=status]")).toHaveText("Saved");
+  await expect(q.getByPlaceholder("What would you love to do?")).toHaveValue(
+    "See the northern lights",
+  );
+  await expect(q.getByPlaceholder("Add a note (optional)")).toHaveValue(
+    "Travel to Tromsø",
+  );
+  const c = await browser.newContext();
+  const other = await c.newPage();
+  await login(other, "other-" + Date.now());
+  await other.getByRole("button", { name: "Bucket List", exact: true }).click();
+  await expect(other.getByPlaceholder("What would you love to do?")).toHaveCount(0);
+  await p.getByRole("heading", { name: "Bucket List", exact: true }).click();
+  await q.getByPlaceholder("Add a note (optional)").fill("Travel with friends");
+  await q.getByRole("heading", { name: "Bucket List", exact: true }).click();
+  await expect(p.getByPlaceholder("Add a note (optional)")).toHaveValue(
+    "Travel with friends",
+  );
+  const completedDate = await p.evaluate(async () => {
+    const { today } = await import("/src/dates.ts" as string);
+    return today();
+  });
+  await p.getByRole("button", { name: "Mark See the northern lights as done" }).click();
+  await expect(
+    q.getByRole("button", { name: "Move See the northern lights back to want to do" }),
+  ).toBeVisible();
+  await expect(q.locator(`time[datetime="${completedDate}"]`)).toBeVisible();
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await expect(p).toHaveURL(/#bucket$/);
+  await expect(
+    p.getByRole("button", { name: "Move See the northern lights back to want to do" }),
+  ).toBeVisible();
+  await q.getByRole("button", { name: "Move See the northern lights back to want to do" }).click();
+  await expect(p.getByRole("button", { name: "Mark See the northern lights as done" })).toBeVisible();
+  await p.getByRole("button", { name: "Mark See the northern lights as done" }).click();
+  await expect(q.locator(`time[datetime="${completedDate}"]`)).toBeVisible();
+  await p.setViewportSize({ width: 390, height: 844 });
+  await expect(p.locator("body")).toHaveJSProperty("scrollWidth", 390);
+  await p.screenshot({ path: "tests/bucket-populated-iphone.png", fullPage: true });
+  await p.setViewportSize({ width: 320, height: 700 });
+  await expect(p.locator("body")).toHaveJSProperty("scrollWidth", 320);
+  await p.setViewportSize({ width: 1440, height: 1000 });
+  p.on("dialog", (d) => d.accept());
+  await p.getByRole("button", { name: "Delete See the northern lights" }).click();
+  await expect(q.getByPlaceholder("What would you love to do?")).toHaveCount(0);
+
+  await p.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await q.getByRole("button", { name: "Dashboard", exact: true }).click();
   await expect(p.locator(".memos")).not.toBeVisible();
   await p.getByRole("button", { name: "Memo", exact: true }).click();
   await expect(p).toHaveURL(/#memo$/);
@@ -566,7 +673,6 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
   await expect(
     p.locator(".weekly").getByPlaceholder("Name your goal"),
   ).toHaveValue("Weekly focus");
-  p.on("dialog", (d) => d.accept());
   await p.getByRole("button", { name: "Memo", exact: true }).click();
   await q.getByRole("button", { name: "Memo", exact: true }).click();
   await p
@@ -584,9 +690,6 @@ test("cloud persistence, live sync, independent edits, routines, offline recover
     })
     .click();
   await expect(q.getByPlaceholder("What would you like to do?")).toHaveCount(0);
-  const c = await browser.newContext();
-  const other = await c.newPage();
-  await login(other, "other-" + Date.now());
   await other.getByRole("button", { name: "Memo", exact: true }).click();
   await expect(
     other.getByPlaceholder("Let your thoughts land here…"),

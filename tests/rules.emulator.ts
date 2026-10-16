@@ -47,6 +47,14 @@ const scheduleRecord = (period: string) => ({
   title: "routine-id",
   days: [0, 2, 4],
 });
+const bucketRecord = () => ({
+  ...record(),
+  kind: "bucket",
+  period: "",
+  title: "See the northern lights",
+  createdAt: 1791072000000,
+  completedAt: "",
+});
 it("allows owner CRUD and rejects another account and anonymous access", async () => {
   const own = doc(
     env.authenticatedContext("alice").firestore(),
@@ -119,4 +127,49 @@ it("validates immutable routine start dates and keeps legacy routines editable",
   const legacy = doc(owner, "users/alice/items/legacy-routine");
   await assertSucceeds(setDoc(legacy, { ...record(), kind: "routine", period: "" }));
   await assertSucceeds(updateDoc(legacy, { days: [0, 2], updatedAt: serverTimestamp() }));
+});
+
+it("allows a bucket item to be edited and completed while keeping it private", async () => {
+  const owner = env.authenticatedContext("alice").firestore();
+  const other = env.authenticatedContext("bob").firestore();
+  const ref = doc(owner, "users/alice/items/bucket-valid");
+  await assertSucceeds(setDoc(ref, bucketRecord()));
+  await assertSucceeds(updateDoc(ref, { body: "Travel in winter", updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(ref, {
+    done: true,
+    completedAt: "2026-10-16",
+    updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(ref, {
+    done: false,
+    completedAt: "",
+    updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(getDoc(ref));
+  await assertFails(getDoc(doc(other, "users/alice/items/bucket-valid")));
+  await assertFails(setDoc(doc(other, "users/alice/items/bucket-other"), bucketRecord()));
+});
+
+it("rejects invalid bucket metadata and protects the creation date", async () => {
+  const owner = env.authenticatedContext("alice").firestore();
+  const ref = doc(owner, "users/alice/items/bucket-validation");
+  const bucket = bucketRecord();
+  const missingCreatedAt: Record<string, unknown> = { ...bucket };
+  delete missingCreatedAt.createdAt;
+  await assertFails(setDoc(ref, { ...bucket, period: "2026-10-16" }));
+  await assertFails(setDoc(ref, missingCreatedAt));
+  await assertFails(setDoc(ref, { ...bucket, createdAt: "2026-10-16" }));
+  await assertFails(setDoc(ref, { ...bucket, completedAt: "October 16" }));
+  await assertFails(setDoc(ref, { ...bucket, done: true, completedAt: "2026-13-16" }));
+  await assertFails(setDoc(ref, { ...bucket, done: true, completedAt: "2026-10-32" }));
+  await assertFails(setDoc(ref, { ...bucket, completedAt: "2026-10-16" }));
+  await assertFails(setDoc(ref, { ...bucket, done: true }));
+  await assertFails(setDoc(doc(owner, "users/alice/items/daily-bucket-fields"), {
+    ...record(),
+    createdAt: bucket.createdAt,
+    completedAt: "",
+  }));
+  await assertSucceeds(setDoc(ref, bucket));
+  await assertFails(updateDoc(ref, { createdAt: bucket.createdAt + 1, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(ref, { done: true, updatedAt: serverTimestamp() }));
 });
