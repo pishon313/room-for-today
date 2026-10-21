@@ -1078,6 +1078,16 @@ h3 {
 .weekly {
   min-height: 280px;
 }
+.weekly .subhead {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.weekly-priority-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
 .daily {
   flex: 1;
   display: flex;

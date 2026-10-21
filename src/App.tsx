@@ -481,6 +481,8 @@ export default function App() {
   );
   const daily = filtered("daily", selected),
     done = daily.filter((x) => x.done).length;
+  const weekly = filtered("weekly", weekStart(selected));
+  const weeklyDone = weekly.filter((item) => item.done).length;
   const routines = filtered("routine");
   const weeklyRoutineProgress = routineWeekProgress(routines, days, items);
   const todayWeekday = weekDays(current).indexOf(current);
@@ -1294,17 +1296,27 @@ export default function App() {
               </div>
               <div className="subhead">
                 <h3>Weekly priorities</h3>
-                <button
-                  className="icon"
-                  aria-label="Add weekly priority"
-                  onClick={() => create("weekly", weekStart(selected))}
-                >
-                  <Plus size={17} />
-                </button>
+                <div className="weekly-priority-actions">
+                  <div className="progress" aria-live="polite">
+                    <span>{weeklyDone} of {weekly.length} done</span>
+                    <progress
+                      aria-label="Weekly priorities completed"
+                      value={weeklyDone}
+                      max={weekly.length || 1}
+                    />
+                  </div>
+                  <button
+                    className="icon"
+                    aria-label="Add weekly priority"
+                    onClick={() => create("weekly", weekStart(selected))}
+                  >
+                    <Plus size={17} />
+                  </button>
+                </div>
               </div>
               <div className="scroll priorities">
-                {filtered("weekly", weekStart(selected)).map(task)}
-                {!filtered("weekly", weekStart(selected)).length && (
+                {weekly.map(task)}
+                {!weekly.length && (
                   <p className="empty">Give this week a little direction.</p>
                 )}
               </div>
